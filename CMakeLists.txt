@@ -32,7 +32,7 @@ if (NOT OnnxRuntime_FOUND)
         include(FetchContent)
         FetchContent_Declare(
             onnxruntime_prebuilt
-            URL https://github.com/microsoft/onnxruntime/releases/download/v1.17.1/onnxruntime-linux-x64-1.17.1.tgz
+            URL https://github.com/microsoft/onnxruntime/releases/download/v1.18.1/onnxruntime-linux-x64-1.18.1.tgz
         )
         FetchContent_MakeAvailable(onnxruntime_prebuilt)
         
@@ -58,7 +58,7 @@ else()
 endif()
 
 # Definitions for YOLO backend
-add_compile_definitions(_YOLO_ONNXRUNTIME _YOLO_OPENCV)
+add_compile_definitions(_YOLO_ONNXRUNTIME)
 
 # Eigen
 find_package(PkgConfig REQUIRED)
@@ -78,6 +78,7 @@ include_directories(
 
 # Source files
 file(GLOB YOLO_SRCS "src/yolo/*.cpp" "src/yolo/onnxruntime/*.cpp")
+list(REMOVE_ITEM YOLO_SRCS "${CMAKE_CURRENT_SOURCE_DIR}/src/yolo/main.cpp")
 set(SRCS
     src/main.cpp
     src/VideoProcessor.cpp

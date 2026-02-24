@@ -1,2 +1,9 @@
 /build/
 /.idea/
+/model/
+/yolov8n-seg.pt
+/empty_init.mp4
+/test.mp4
+/output_dir/
+/out_dir/manifest.mpd
+/out_dir/manifest-stream0.mp4

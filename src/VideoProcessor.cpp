@@ -1,303 +1,329 @@
 #include "VideoProcessor.h"
+#include "yolo/yolo.h"
 #include <filesystem>
+#include <fstream>
 #include <iostream>
-#include <memory>
-#include <vector>
+#include <stdexcept>
+
+extern "C" {
+#include <libavcodec/avcodec.h>
+#include <libavformat/avformat.h>
+#include <libavutil/avutil.h>
+#include <libswscale/swscale.h>
+}
 
 namespace fs = std::filesystem;
 
-VideoProcessor::VideoProcessor(const std::string &modelPath)
-    : modelPath(modelPath) {
-  // Algo_Type::YOLOv8 is 5 (from yolo.h enum)
-  // Device_Type::GPU (1)
-  // Model_Type::FP32 (0)
-  // We access create factory or just instantiate directly.
-  // yolo_onnxruntime_segment.h defines YOLO_ONNXRuntime_Segment class.
-  // We can just use that.
-
-  yolo = std::make_unique<YOLO_ONNXRuntime_Segment>();
-  // Call init.
-  // algo_type=5 (YOLOv8), device_type=1 (GPU) - assuming user has GPU,
-  // otherwise 0 (CPU) Let's try GPU first, if it fails, maybe fallback? But
-  // ONNX Runtime usually handles it or throws? We'll stick to CPU (0) to be
-  // safe given the environment is unknown, or check if cuda is available? User
-  // requirement: "Reference for using ONNx runtime in
-  // /home/nickzt/Projects/TactOrder/MNNLLama/inference-services/onnx-service"
-  // Usually onnxruntime implies CPU unless CUDA provider is installed.
-  // Let's use CPU (0) for safety unless we see CUDA requirement.
-  // Wait, the reference repo has "gpu" in path "onnxruntime-linux-x64-gpu...".
-  // I'll try GPU (1). If it fails, I might crash.
-  // Let's stick to GPU (1) as requested implicitly by "reference
-  // implementation". Actually, "video_processor" implies high perf.
-  yolo->init(YOLOv8, GPU, FP32, modelPath);
-}
-
-VideoProcessor::~VideoProcessor() {
-  if (inputFmtCtx)
-    avformat_close_input(&inputFmtCtx);
-  if (outputFmtCtx) {
-    if (outputFmtCtx->pb)
-      avio_closep(&outputFmtCtx->pb);
-    avformat_free_context(outputFmtCtx);
-  }
-}
-
-// Helpers for ffmpeg error handling
 static void check_error(int result, const std::string &msg) {
   if (result < 0) {
     char errbuf[128];
     av_strerror(result, errbuf, sizeof(errbuf));
-    std::cerr << msg << ": " << errbuf << std::endl;
-    throw std::runtime_error(msg + ": " + errbuf);
+    throw std::runtime_error(msg + ": " + std::string(errbuf));
   }
 }
+
+class VideoDecoder {
+public:
+  explicit VideoDecoder(const std::string &inputPath) : inputPath(inputPath) {
+    packet = av_packet_alloc();
+    frame = av_frame_alloc();
+    frameBGR = av_frame_alloc();
+  }
+
+  ~VideoDecoder() {
+    if (swsCtx)
+      sws_freeContext(swsCtx);
+    if (codecCtx)
+      avcodec_free_context(&codecCtx);
+    if (fmtCtx)
+      avformat_close_input(&fmtCtx);
+    if (frameBGR)
+      av_frame_free(&frameBGR);
+    if (frame)
+      av_frame_free(&frame);
+    if (packet)
+      av_packet_free(&packet);
+  }
+
+  bool open() {
+    if (avformat_open_input(&fmtCtx, inputPath.c_str(), nullptr, nullptr) < 0)
+      return false;
+    if (avformat_find_stream_info(fmtCtx, nullptr) < 0)
+      return false;
+
+    for (unsigned int i = 0; i < fmtCtx->nb_streams; i++) {
+      if (fmtCtx->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_VIDEO) {
+        videoStreamIdx = i;
+        break;
+      }
+    }
+    if (videoStreamIdx == -1)
+      return false;
+
+    AVCodecParameters *codecPar = fmtCtx->streams[videoStreamIdx]->codecpar;
+    const AVCodec *decoder = avcodec_find_decoder(codecPar->codec_id);
+    codecCtx = avcodec_alloc_context3(decoder);
+    avcodec_parameters_to_context(codecCtx, codecPar);
+    avcodec_open2(codecCtx, decoder, nullptr);
+
+    frameBGR->format = AV_PIX_FMT_BGR24;
+    frameBGR->width = codecCtx->width;
+    frameBGR->height = codecCtx->height;
+    av_frame_get_buffer(frameBGR, 0);
+
+    swsCtx =
+        sws_getContext(codecCtx->width, codecCtx->height, codecCtx->pix_fmt,
+                       codecCtx->width, codecCtx->height, AV_PIX_FMT_BGR24,
+                       SWS_BILINEAR, nullptr, nullptr, nullptr);
+    return true;
+  }
+
+  bool readFrame(cv::Mat &outFrame, int64_t &outPts) {
+    while (av_read_frame(fmtCtx, packet) >= 0) {
+      if (packet->stream_index == videoStreamIdx) {
+        if (avcodec_send_packet(codecCtx, packet) == 0) {
+          if (avcodec_receive_frame(codecCtx, frame) == 0) {
+            sws_scale(swsCtx, frame->data, frame->linesize, 0, frame->height,
+                      frameBGR->data, frameBGR->linesize);
+
+            outFrame = cv::Mat(frame->height, frame->width, CV_8UC3,
+                               frameBGR->data[0], frameBGR->linesize[0])
+                           .clone();
+            outPts = frame->pts;
+            av_packet_unref(packet);
+            return true;
+          }
+        }
+      }
+      av_packet_unref(packet);
+    }
+    return false;
+  }
+
+  int getWidth() const { return codecCtx->width; }
+  int getHeight() const { return codecCtx->height; }
+  AVRational getTimeBase() const {
+    return fmtCtx->streams[videoStreamIdx]->time_base;
+  }
+
+private:
+  std::string inputPath;
+  AVFormatContext *fmtCtx = nullptr;
+  AVCodecContext *codecCtx = nullptr;
+  SwsContext *swsCtx = nullptr;
+  int videoStreamIdx = -1;
+  AVPacket *packet = nullptr;
+  AVFrame *frame = nullptr;
+  AVFrame *frameBGR = nullptr;
+};
+
+class VideoEncoder {
+public:
+  VideoEncoder(const std::string &outputPath, int width, int height,
+               AVRational timeBase)
+      : outputPath(outputPath), width(width), height(height),
+        timeBase(timeBase) {
+    packet = av_packet_alloc();
+    encFrame = av_frame_alloc();
+  }
+
+  ~VideoEncoder() {
+    if (swsCtx)
+      sws_freeContext(swsCtx);
+    if (codecCtx)
+      avcodec_free_context(&codecCtx);
+    if (fmtCtx) {
+      if (!(fmtCtx->oformat->flags & AVFMT_NOFILE) && fmtCtx->pb)
+        avio_closep(&fmtCtx->pb);
+      avformat_free_context(fmtCtx);
+    }
+    if (encFrame)
+      av_frame_free(&encFrame);
+    if (packet)
+      av_packet_free(&packet);
+  }
+
+  bool open() {
+    avformat_alloc_output_context2(&fmtCtx, nullptr, "dash",
+                                   outputPath.c_str());
+    if (!fmtCtx)
+      return false;
+
+    outStream = avformat_new_stream(fmtCtx, nullptr);
+    const AVCodec *encoder = avcodec_find_encoder(AV_CODEC_ID_H264);
+    codecCtx = avcodec_alloc_context3(encoder);
+
+    codecCtx->height = height;
+    codecCtx->width = width;
+    codecCtx->sample_aspect_ratio = {1, 1};
+    codecCtx->pix_fmt = AV_PIX_FMT_YUV420P;
+    codecCtx->time_base = timeBase;
+
+    if (fmtCtx->oformat->flags & AVFMT_GLOBALHEADER)
+      codecCtx->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;
+
+    if (avcodec_open2(codecCtx, encoder, nullptr) < 0)
+      return false;
+    avcodec_parameters_from_context(outStream->codecpar, codecCtx);
+
+    AVDictionary *opts = nullptr;
+    av_dict_set(&opts, "init_seg_name", "init.dash", 0);
+    av_dict_set(&opts, "media_seg_name", "segment.m4s", 0);
+    av_dict_set(&opts, "use_template", "0", 0);
+    av_dict_set(&opts, "use_timeline", "0", 0);
+    av_dict_set(&opts, "single_file", "1", 0);
+
+    if (!(fmtCtx->oformat->flags & AVFMT_NOFILE)) {
+      if (avio_open(&fmtCtx->pb, outputPath.c_str(), AVIO_FLAG_WRITE) < 0)
+        return false;
+    }
+
+    check_error(avformat_write_header(fmtCtx, &opts), "write header");
+
+    encFrame->format = codecCtx->pix_fmt;
+    encFrame->width = codecCtx->width;
+    encFrame->height = codecCtx->height;
+    av_frame_get_buffer(encFrame, 32);
+
+    swsCtx = sws_getContext(width, height, AV_PIX_FMT_BGR24, width, height,
+                            AV_PIX_FMT_YUV420P, SWS_BILINEAR, nullptr, nullptr,
+                            nullptr);
+    return true;
+  }
+
+  void writeFrame(const cv::Mat &frame, int64_t pts) {
+    const uint8_t *data[1] = {frame.data};
+    int linesize[1] = {static_cast<int>(frame.step)};
+
+    sws_scale(swsCtx, data, linesize, 0, height, encFrame->data,
+              encFrame->linesize);
+    encFrame->pts = pts;
+
+    if (avcodec_send_frame(codecCtx, encFrame) == 0) {
+      receiveAndWritePackets();
+    }
+  }
+
+  void flush() {
+    if (avcodec_send_frame(codecCtx, nullptr) == 0) {
+      receiveAndWritePackets();
+    }
+    av_write_trailer(fmtCtx);
+  }
+
+private:
+  void receiveAndWritePackets() {
+    while (avcodec_receive_packet(codecCtx, packet) == 0) {
+      packet->stream_index = 0;
+      av_packet_rescale_ts(packet, codecCtx->time_base, outStream->time_base);
+      av_interleaved_write_frame(fmtCtx, packet);
+      av_packet_unref(packet);
+    }
+  }
+
+  std::string outputPath;
+  AVFormatContext *fmtCtx = nullptr;
+  AVCodecContext *codecCtx = nullptr;
+  AVStream *outStream = nullptr;
+  SwsContext *swsCtx = nullptr;
+  AVPacket *packet = nullptr;
+  AVFrame *encFrame = nullptr;
+  int width, height;
+  AVRational timeBase;
+};
+
+// --- Video Processor Class ---
+
+VideoProcessor::VideoProcessor(const std::string &modelPath)
+    : modelPath(modelPath) {
+  std::unique_ptr<YOLO> base_yolo = CreateFactory::instance().create(
+      Backend_Type::ONNXRuntime, Task_Type::Segment);
+
+  if (!base_yolo) {
+    throw std::runtime_error("Failed to create YOLO model instance.");
+  }
+
+  yolo = std::unique_ptr<YOLO_Segment>(
+      dynamic_cast<YOLO_Segment *>(base_yolo.release()));
+  // Depending on system architecture, fallback to CPU might be necessary, but
+  // defaulting to GPU for performance if available
+  yolo->init(YOLOv8, CPU, FP32, modelPath);
+}
+
+VideoProcessor::~VideoProcessor() {}
 
 bool VideoProcessor::processConfig(const std::string &initSegmentPath,
                                    const std::string &mediaSegmentPath,
                                    const std::string &outputDir) {
-  // 1. Prepare Input
-  // We need to read init and media segments.
-  // Simpler approach: Create a temporary concatenated file.
-  // Or we can rely on standard file I/O to read them into a buffer and use
-  // custom AVIO. Concatenating to a temp file is robust and easy for
-  // libavformat.
-
   std::string tempInput = "temp_full_input.mp4";
-  // Concatenate files
+
   {
     std::ofstream outfile(tempInput, std::ios::binary);
-    std::ifstream initFile(initSegmentPath, std::ios::binary);
-    outfile << initFile.rdbuf();
+
+    // Check if init segment is valid and non-empty
+    if (!initSegmentPath.empty() && fs::exists(initSegmentPath) &&
+        fs::file_size(initSegmentPath) > 0) {
+      std::ifstream initFile(initSegmentPath, std::ios::binary);
+      outfile << initFile.rdbuf();
+    }
+
     std::ifstream mediaFile(mediaSegmentPath, std::ios::binary);
     outfile << mediaFile.rdbuf();
   }
 
-  // Open Input
-  if (avformat_open_input(&inputFmtCtx, tempInput.c_str(), nullptr, nullptr) <
-      0) {
-    std::cerr << "Could not open input file" << std::endl;
+  VideoDecoder decoder(tempInput);
+  if (!decoder.open()) {
+    std::cerr << "Failed to open input video" << std::endl;
     return false;
   }
 
-  if (avformat_find_stream_info(inputFmtCtx, nullptr) < 0) {
-    std::cerr << "Could not find stream info" << std::endl;
+  std::string outputManifest = outputDir + "/manifest.mpd";
+  VideoEncoder encoder(outputManifest, decoder.getWidth(), decoder.getHeight(),
+                       decoder.getTimeBase());
+  if (!encoder.open()) {
+    std::cerr << "Failed to open output video" << std::endl;
     return false;
   }
 
-  int videoStreamIdx = -1;
-  for (unsigned int i = 0; i < inputFmtCtx->nb_streams; i++) {
-    if (inputFmtCtx->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_VIDEO) {
-      videoStreamIdx = i;
-      break;
-    }
+  cv::Mat frame;
+  int64_t pts;
+
+  while (decoder.readFrame(frame, pts)) {
+    processFrame(frame);
+    encoder.writeFrame(frame, pts);
   }
 
-  if (videoStreamIdx == -1) {
-    std::cerr << "No video stream found" << std::endl;
-    return false;
-  }
-
-  AVCodecParameters *codecPar = inputFmtCtx->streams[videoStreamIdx]->codecpar;
-  const AVCodec *decoder = avcodec_find_decoder(codecPar->codec_id);
-  AVCodecContext *decoderCtx = avcodec_alloc_context3(decoder);
-  avcodec_parameters_to_context(decoderCtx, codecPar);
-  avcodec_open2(decoderCtx, decoder, nullptr);
-
-  // 2. Prepare Output
-  // We want DASH output: init.dash and segment.m4s
-  // We can use the dash muxer.
-  std::string outputManifest =
-      outputDir + "/manifest.mpd"; // Dash requires MPD, but we can ignore it
-  // Or simpler: Use mp4 muxer with frag_custom and split manually? No.
-  // Use dash muxer.
-
-  avformat_alloc_output_context2(&outputFmtCtx, nullptr, "dash",
-                                 outputManifest.c_str());
-  if (!outputFmtCtx) {
-    std::cerr << "Could not create output context" << std::endl;
-    return false;
-  }
-
-  AVStream *outStream = avformat_new_stream(outputFmtCtx, nullptr);
-  // Be careful here. We are not re-encoding if we can avoid it?
-  // Requirement says: "encode processed frames back to the output data segment"
-  // So we MUST re-encode.
-
-  const AVCodec *encoder = avcodec_find_encoder(AV_CODEC_ID_H264);
-  AVCodecContext *encoderCtx = avcodec_alloc_context3(encoder);
-
-  encoderCtx->height = decoderCtx->height;
-  encoderCtx->width = decoderCtx->width;
-  encoderCtx->sample_aspect_ratio = decoderCtx->sample_aspect_ratio;
-  encoderCtx->pix_fmt = AV_PIX_FMT_YUV420P; // YOLO uses BGR, we convert back
-  encoderCtx->time_base =
-      inputFmtCtx->streams[videoStreamIdx]->time_base; // Use same time base
-  // encoderCtx->framerate = decoderCtx->framerate; // Deprecated?
-
-  // Set some encoding options for DASH compatibility?
-  // Just minimal options for now.
-
-  if (outputFmtCtx->oformat->flags & AVFMT_GLOBALHEADER)
-    encoderCtx->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;
-
-  avcodec_open2(encoderCtx, encoder, nullptr);
-  avcodec_parameters_from_context(outStream->codecpar, encoderCtx);
-
-  // Dash specific options
-  AVDictionary *opts = nullptr;
-  av_dict_set(&opts, "init_seg_name", "init.dash", 0);
-  av_dict_set(&opts, "media_seg_name", "segment.m4s", 0);
-  av_dict_set(&opts, "use_template", "0", 0);
-  av_dict_set(&opts, "use_timeline", "0", 0);
-  av_dict_set(&opts, "single_file", "1", 0); // To produce one segment file?
-  // Wait, typical DASH is init + segments.
-  // If we want init.dash and segment.m4s (single segment),
-  // we should configure it to yield exactly that.
-  // Maybe just use mp4 muxer with fragmentation options?
-  // command: ffmpeg ... -f mp4 -movflags
-  // empty_moov+default_base_moof+frag_keyframe ... output.mp4 And output.mp4
-  // will contain everything. But user wants 2 files. Actually, splitting a
-  // fragmented MP4 into init and segment is just cutting at the first 'moof'.
-  // The "init" is 'ftyp' + 'moov'. The "segment" is 'moof' + 'mdat'.
-
-  // Let's stick to reading frames, processing and writing to fragmented mp4
-  // helper. But getting exactly "init.dash" and "segment.m4s" names with one
-  // muxer might be tricky without "dash" muxer. Using "dash" muxer with single
-  // segment output is probably best.
-
-  if (!(outputFmtCtx->oformat->flags & AVFMT_NOFILE)) {
-    if (avio_open(&outputFmtCtx->pb, outputManifest.c_str(), AVIO_FLAG_WRITE) <
-        0) {
-      std::cerr << "Could not open output file" << std::endl;
-      return false;
-    }
-  }
-
-  // Write Header
-  check_error(avformat_write_header(outputFmtCtx, &opts), "write header");
-
-  // 3. Processing Loop
-  AVPacket *packet = av_packet_alloc();
-  AVFrame *frame = av_frame_alloc();
-  AVFrame *frameBGR = av_frame_alloc();
-
-  // Alloc buffers for BGR frame
-  frameBGR->format = AV_PIX_FMT_BGR24;
-  frameBGR->width = decoderCtx->width;
-  frameBGR->height = decoderCtx->height;
-  av_frame_get_buffer(frameBGR, 0);
-
-  // SwsContext
-  SwsContext *swsCtx =
-      sws_getContext(decoderCtx->width, decoderCtx->height, decoderCtx->pix_fmt,
-                     decoderCtx->width, decoderCtx->height, AV_PIX_FMT_BGR24,
-                     SWS_BILINEAR, nullptr, nullptr, nullptr);
-
-  SwsContext *swsCtxRev =
-      sws_getContext(decoderCtx->width, decoderCtx->height, AV_PIX_FMT_BGR24,
-                     decoderCtx->width, decoderCtx->height, AV_PIX_FMT_YUV420P,
-                     SWS_BILINEAR, nullptr, nullptr, nullptr);
-
-  while (av_read_frame(inputFmtCtx, packet) >= 0) {
-    if (packet->stream_index == videoStreamIdx) {
-      if (avcodec_send_packet(decoderCtx, packet) == 0) {
-        while (avcodec_receive_frame(decoderCtx, frame) == 0) {
-          // Convert YUV -> BGR
-          sws_scale(swsCtx, frame->data, frame->linesize, 0, frame->height,
-                    frameBGR->data, frameBGR->linesize);
-
-          // Create cv::Mat wrapper
-          cv::Mat img(frame->height, frame->width, CV_8UC3, frameBGR->data[0],
-                      frameBGR->linesize[0]);
-
-          // Process Frame
-          processFrame(img);
-
-          // Convert BGR -> YUV (reuse frame buffer if possible, or new one)
-          // We need to write to a writable frame for encoder
-          AVFrame *encFrame = av_frame_alloc();
-          encFrame->format = encoderCtx->pix_fmt;
-          encFrame->width = encoderCtx->width;
-          encFrame->height = encoderCtx->height;
-          av_frame_get_buffer(encFrame, 32);
-          encFrame->pts = frame->pts; // Propagate PTS
-
-          sws_scale(swsCtxRev, frameBGR->data, frameBGR->linesize, 0,
-                    frameBGR->height, encFrame->data, encFrame->linesize);
-
-          // Encode
-          if (avcodec_send_frame(encoderCtx, encFrame) == 0) {
-            AVPacket *encPacket = av_packet_alloc();
-            while (avcodec_receive_packet(encoderCtx, encPacket) == 0) {
-              encPacket->stream_index = 0; // Output has only 1 stream
-              av_packet_rescale_ts(encPacket, encoderCtx->time_base,
-                                   outStream->time_base);
-              av_interleaved_write_frame(outputFmtCtx, encPacket);
-              av_packet_unref(encPacket);
-            }
-            av_packet_free(&encPacket);
-          }
-          av_frame_free(&encFrame);
-        }
-      }
-    }
-    av_packet_unref(packet);
-  }
-
-  // Flush encoder
-  avcodec_send_frame(encoderCtx, nullptr);
-  AVPacket *encPacket = av_packet_alloc();
-  while (avcodec_receive_packet(encoderCtx, encPacket) == 0) {
-    encPacket->stream_index = 0;
-    av_packet_rescale_ts(encPacket, encoderCtx->time_base,
-                         outStream->time_base);
-    av_interleaved_write_frame(outputFmtCtx, encPacket);
-    av_packet_unref(encPacket);
-  }
-  av_packet_free(&encPacket);
-
-  av_write_trailer(outputFmtCtx);
-
-  // Cleanup
-  av_frame_free(&frame);
-  av_frame_free(&frameBGR);
-  av_packet_free(&packet);
-  sws_freeContext(swsCtx);
-  sws_freeContext(swsCtxRev);
-  avcodec_free_context(&decoderCtx);
-  avcodec_free_context(&encoderCtx);
+  encoder.flush();
   fs::remove(tempInput);
 
   return true;
 }
 
 void VideoProcessor::processFrame(cv::Mat &frame) {
-  // 1. Run Inference
   yolo->infer_image(frame);
-
-  // 2. Get Results
   const std::vector<OutputSeg> &output = yolo->getOutputSeg();
 
-  // 3. Apply Masks
-  // Person class ID is usually 0 in COCO
   for (const auto &det : output) {
     if (det.id == 0) { // Person
-      // Apply mask (paint black)
-      // mask is a cv::Mat (CV_8UC1 probably, boolean or 0-255)
-      // It is cropped to the box?
-      // Checking yolo_segment.h:
-      // "mask = mask(temp_rect - cv::Point(left, top)) > mask_threshold;"
-      // "output.mask = mask;"
-      // It seems output.mask is the mask for the box region.
-      // And draw_result implementation:
-      // "mask(bbox).setTo(cv::Scalar(...), output_seg[i].mask);"
-
-      // We want to set pixels to BLACK (0,0,0)
+      // intersection with frame
       cv::Rect bbox = det.box & cv::Rect(0, 0, frame.cols, frame.rows);
+
       if (bbox.area() > 0 && !det.mask.empty()) {
-        // Resize mask if needed? det.mask should match bbox size if
-        // implementation is correct. Assuming it matches.
-        frame(bbox).setTo(cv::Scalar(0, 0, 0), det.mask);
+        // det.mask corresponds to det.box. We need to crop it to bbox.
+        // The offset is the difference between bbox.tl() and det.box.tl()
+        cv::Rect mask_roi(bbox.x - det.box.x, bbox.y - det.box.y, bbox.width,
+                          bbox.height);
+
+        // Ensure ROI is within mask bounds
+        mask_roi = mask_roi & cv::Rect(0, 0, det.mask.cols, det.mask.rows);
+
+        if (mask_roi.area() > 0 && mask_roi.width == bbox.width &&
+            mask_roi.height == bbox.height) {
+          cv::Mat valid_mask = det.mask(mask_roi).clone();
+          if (!valid_mask.empty() && valid_mask.type() == CV_8UC1) {
+            frame(bbox).setTo(cv::Scalar(0, 0, 0), valid_mask);
+          }
+        }
       }
     }
   }

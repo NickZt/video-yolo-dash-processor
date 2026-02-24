@@ -137,9 +137,22 @@ protected:
     int width = ceil(net_width / seg_width * rang_w / params[0]);
     int height = ceil(net_height / seg_height * rang_h / params[1]);
 
+    // Ensure valid sizing before resize
+    width = MAX(width, 1);
+    height = MAX(height, 1);
+
     cv::resize(dest, mask, cv::Size(width, height), cv::INTER_LINEAR);
-    mask = mask(temp_rect - cv::Point(left, top)) > mask_threshold;
-    output.mask = mask;
+
+    cv::Rect crop_rect = temp_rect - cv::Point(left, top);
+    crop_rect = crop_rect &
+                cv::Rect(0, 0, mask.cols, mask.rows); // Clamp to mask bounds!
+
+    if (crop_rect.area() > 0) {
+      mask = mask(crop_rect) > mask_threshold;
+      output.mask = mask;
+    } else {
+      output.mask = cv::Mat(); // Or zero mask.
+    }
   }
 
   /**
