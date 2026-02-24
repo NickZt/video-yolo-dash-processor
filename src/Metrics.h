@@ -30,6 +30,11 @@ public:
     total_time_to_conversion += ms;
   }
 
+  void addTimeToInference(double ms) {
+    std::lock_guard<std::mutex> lock(mtx);
+    total_time_to_inference += ms;
+  }
+
   void printMetrics() {
     auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(
                         end_time - start_time)
@@ -44,6 +49,9 @@ public:
     double avg_ttc = frames_decoded.load() > 0
                          ? total_time_to_conversion / frames_decoded.load()
                          : 0.0;
+    double avg_tti = frames_inferred.load() > 0
+                         ? total_time_to_inference / frames_inferred.load()
+                         : 0.0;
 
     std::cout << "\n=== Video Processing Metrics ===\n";
     std::cout << "Total Time: " << duration << " ms\n";
@@ -53,6 +61,7 @@ public:
     std::cout << "Average FPS: " << fps << "\n";
     std::cout << "Average Time to Frame (T2F): " << avg_t2f << " ms\n";
     std::cout << "Average Time to Conversion (TTC): " << avg_ttc << " ms\n";
+    std::cout << "Average Time to Inference (TTI): " << avg_tti << " ms\n";
     std::cout << "================================\n\n";
   }
 
@@ -66,6 +75,7 @@ private:
 
   double total_time_to_frame{0};
   double total_time_to_conversion{0};
+  double total_time_to_inference{0};
 
   std::chrono::steady_clock::time_point start_time;
   std::chrono::steady_clock::time_point end_time;
