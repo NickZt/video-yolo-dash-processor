@@ -183,15 +183,6 @@ public:
 
     avcodec_parameters_from_context(outStream->codecpar, codecCtx);
 
-    // Copy Extradata to preserve compatibility
-    if (inStream->codecpar->extradata_size > 0) {
-      outStream->codecpar->extradata = (uint8_t *)av_mallocz(
-          inStream->codecpar->extradata_size + AV_INPUT_BUFFER_PADDING_SIZE);
-      memcpy(outStream->codecpar->extradata, inStream->codecpar->extradata,
-             inStream->codecpar->extradata_size);
-      outStream->codecpar->extradata_size = inStream->codecpar->extradata_size;
-    }
-
     AVDictionary *opts = nullptr;
     av_dict_set(&opts, "window_size", "5", 0);
     av_dict_set(&opts, "extra_window_size", "5", 0);
