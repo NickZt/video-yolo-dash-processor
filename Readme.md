@@ -69,3 +69,8 @@ Mask Apply (in Y plane)
 Encode
 ↓
 Mux (fragmented mp4)
+
+
+python script to print ONNX model output shapes
+
+python3 -c "import onnxruntime as ort; session = ort.InferenceSession('../model/yolov8n-seg.onnx'); print([o.shape for o in session.get_outputs()])"

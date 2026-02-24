@@ -158,7 +158,8 @@ public:
   }
 
   bool open() {
-    avformat_alloc_output_context2(&fmtCtx, nullptr, "mp4", outputPath.c_str());
+    avformat_alloc_output_context2(&fmtCtx, nullptr, "dash",
+                                   outputPath.c_str());
     if (!fmtCtx)
       return false;
 
@@ -192,8 +193,12 @@ public:
     }
 
     AVDictionary *opts = nullptr;
-    av_dict_set(&opts, "movflags", "frag_keyframe+empty_moov+default_base_moof",
-                0);
+    av_dict_set(&opts, "window_size", "5", 0);
+    av_dict_set(&opts, "extra_window_size", "5", 0);
+    av_dict_set(&opts, "seg_duration", "2", 0);
+    av_dict_set(&opts, "init_seg_name", "init.dash", 0);
+    av_dict_set(&opts, "media_seg_name", "segment$Number$.m4s", 0);
+    av_dict_set(&opts, "allowed_extensions", "ALL", 0);
 
     if (!(fmtCtx->oformat->flags & AVFMT_NOFILE)) {
       if (avio_open(&fmtCtx->pb, outputPath.c_str(), AVIO_FLAG_WRITE) < 0)
@@ -301,8 +306,10 @@ bool VideoProcessor::processConfig(const std::string &initSegmentPath,
     return false;
   }
 
-  std::string outputManifest = outputDir + "/manifest.mpd";
-  VideoEncoder encoder(outputManifest, decoder.getStream());
+  Metrics::getInstance().setFrameSize(decoder.getWidth(), decoder.getHeight());
+
+  std::string outputFileName = outputDir + "/manifest.mpd";
+  VideoEncoder encoder(outputFileName, decoder.getStream());
   if (!encoder.open()) {
     std::cerr << "Failed to open output video" << std::endl;
     return false;

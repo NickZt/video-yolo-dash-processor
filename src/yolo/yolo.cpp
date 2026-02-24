@@ -33,13 +33,7 @@ void YOLO::infer_image(const cv::Mat &image) {
   if (image.empty())
     return;
   m_image = image.clone();
-  m_draw_result = false; // We handle drawing/masking externally in
-                         // VideoProcessor or we can use the result.
-  // Actually, we want the masks. The masks are stored in m_output_seg (for
-  // segment task). We should ensure m_output_seg is accessible or processed.
-  // Base YOLO doesn't have m_output_seg, derived YOLO_Segment has it.
-  // We will cast or modify access later if needed, but for now just run the
-  // pipeline.
+  m_draw_result = true;
 
   pre_process();
   process();

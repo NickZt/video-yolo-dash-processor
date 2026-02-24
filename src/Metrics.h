@@ -35,6 +35,11 @@ public:
     total_time_to_inference += ms;
   }
 
+  void setFrameSize(int w, int h) {
+    frame_width.store(w);
+    frame_height.store(h);
+  }
+
   void printMetrics() {
     auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(
                         end_time - start_time)
@@ -54,6 +59,8 @@ public:
                          : 0.0;
 
     std::cout << "\n=== Video Processing Metrics ===\n";
+    std::cout << "Frame Size: " << frame_width.load() << "x"
+              << frame_height.load() << "\n";
     std::cout << "Total Time: " << duration << " ms\n";
     std::cout << "Frames Decoded: " << frames_decoded.load() << "\n";
     std::cout << "Frames Inferred: " << frames_inferred.load() << "\n";
@@ -68,6 +75,9 @@ public:
 private:
   Metrics() = default;
   ~Metrics() = default;
+
+  std::atomic<int> frame_width{0};
+  std::atomic<int> frame_height{0};
 
   std::atomic<int> frames_decoded{0};
   std::atomic<int> frames_inferred{0};
