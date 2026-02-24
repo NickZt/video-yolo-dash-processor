@@ -1,5 +1,7 @@
 #include "VideoProcessor.h"
+#include "Metrics.h"
 #include "yolo/yolo.h"
+#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -79,10 +81,16 @@ public:
   }
 
   bool readFrame(cv::Mat &outFrame, int64_t &outPts) {
+    auto t0 = std::chrono::high_resolution_clock::now();
     while (av_read_frame(fmtCtx, packet) >= 0) {
       if (packet->stream_index == videoStreamIdx) {
         if (avcodec_send_packet(codecCtx, packet) == 0) {
           if (avcodec_receive_frame(codecCtx, frame) == 0) {
+            auto t1 = std::chrono::high_resolution_clock::now();
+            double read_time =
+                std::chrono::duration<double, std::milli>(t1 - t0).count();
+            Metrics::getInstance().addTimeToFrame(read_time);
+
             sws_scale(swsCtx, frame->data, frame->linesize, 0, frame->height,
                       frameBGR->data, frameBGR->linesize);
 
@@ -91,6 +99,13 @@ public:
                            .clone();
             outPts = frame->pts;
             av_packet_unref(packet);
+
+            auto t2 = std::chrono::high_resolution_clock::now();
+            double conv_time =
+                std::chrono::duration<double, std::milli>(t2 - t1).count();
+            Metrics::getInstance().addTimeToConversion(conv_time);
+            Metrics::getInstance().incrementFramesDecoded();
+
             return true;
           }
         }
@@ -105,6 +120,7 @@ public:
   AVRational getTimeBase() const {
     return fmtCtx->streams[videoStreamIdx]->time_base;
   }
+  AVStream *getStream() const { return fmtCtx->streams[videoStreamIdx]; }
 
 private:
   std::string inputPath;
@@ -119,10 +135,8 @@ private:
 
 class VideoEncoder {
 public:
-  VideoEncoder(const std::string &outputPath, int width, int height,
-               AVRational timeBase)
-      : outputPath(outputPath), width(width), height(height),
-        timeBase(timeBase) {
+  VideoEncoder(const std::string &outputPath, AVStream *inStream)
+      : outputPath(outputPath), inStream(inStream) {
     packet = av_packet_alloc();
     encFrame = av_frame_alloc();
   }
@@ -144,8 +158,7 @@ public:
   }
 
   bool open() {
-    avformat_alloc_output_context2(&fmtCtx, nullptr, "dash",
-                                   outputPath.c_str());
+    avformat_alloc_output_context2(&fmtCtx, nullptr, "mp4", outputPath.c_str());
     if (!fmtCtx)
       return false;
 
@@ -153,25 +166,34 @@ public:
     const AVCodec *encoder = avcodec_find_encoder(AV_CODEC_ID_H264);
     codecCtx = avcodec_alloc_context3(encoder);
 
-    codecCtx->height = height;
-    codecCtx->width = width;
-    codecCtx->sample_aspect_ratio = {1, 1};
+    codecCtx->height = inStream->codecpar->height;
+    codecCtx->width = inStream->codecpar->width;
+    codecCtx->sample_aspect_ratio = inStream->codecpar->sample_aspect_ratio;
     codecCtx->pix_fmt = AV_PIX_FMT_YUV420P;
-    codecCtx->time_base = timeBase;
+    codecCtx->time_base = inStream->time_base;
+    codecCtx->profile = inStream->codecpar->profile;
+    codecCtx->level = inStream->codecpar->level;
 
     if (fmtCtx->oformat->flags & AVFMT_GLOBALHEADER)
       codecCtx->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;
 
     if (avcodec_open2(codecCtx, encoder, nullptr) < 0)
       return false;
+
     avcodec_parameters_from_context(outStream->codecpar, codecCtx);
 
+    // Copy Extradata to preserve compatibility
+    if (inStream->codecpar->extradata_size > 0) {
+      outStream->codecpar->extradata = (uint8_t *)av_mallocz(
+          inStream->codecpar->extradata_size + AV_INPUT_BUFFER_PADDING_SIZE);
+      memcpy(outStream->codecpar->extradata, inStream->codecpar->extradata,
+             inStream->codecpar->extradata_size);
+      outStream->codecpar->extradata_size = inStream->codecpar->extradata_size;
+    }
+
     AVDictionary *opts = nullptr;
-    av_dict_set(&opts, "init_seg_name", "init.dash", 0);
-    av_dict_set(&opts, "media_seg_name", "segment.m4s", 0);
-    av_dict_set(&opts, "use_template", "0", 0);
-    av_dict_set(&opts, "use_timeline", "0", 0);
-    av_dict_set(&opts, "single_file", "1", 0);
+    av_dict_set(&opts, "movflags", "frag_keyframe+empty_moov+default_base_moof",
+                0);
 
     if (!(fmtCtx->oformat->flags & AVFMT_NOFILE)) {
       if (avio_open(&fmtCtx->pb, outputPath.c_str(), AVIO_FLAG_WRITE) < 0)
@@ -185,9 +207,10 @@ public:
     encFrame->height = codecCtx->height;
     av_frame_get_buffer(encFrame, 32);
 
-    swsCtx = sws_getContext(width, height, AV_PIX_FMT_BGR24, width, height,
-                            AV_PIX_FMT_YUV420P, SWS_BILINEAR, nullptr, nullptr,
-                            nullptr);
+    swsCtx =
+        sws_getContext(codecCtx->width, codecCtx->height, AV_PIX_FMT_BGR24,
+                       codecCtx->width, codecCtx->height, AV_PIX_FMT_YUV420P,
+                       SWS_BILINEAR, nullptr, nullptr, nullptr);
     return true;
   }
 
@@ -195,13 +218,14 @@ public:
     const uint8_t *data[1] = {frame.data};
     int linesize[1] = {static_cast<int>(frame.step)};
 
-    sws_scale(swsCtx, data, linesize, 0, height, encFrame->data,
+    sws_scale(swsCtx, data, linesize, 0, codecCtx->height, encFrame->data,
               encFrame->linesize);
     encFrame->pts = pts;
 
     if (avcodec_send_frame(codecCtx, encFrame) == 0) {
       receiveAndWritePackets();
     }
+    Metrics::getInstance().incrementFramesEncoded();
   }
 
   void flush() {
@@ -225,11 +249,10 @@ private:
   AVFormatContext *fmtCtx = nullptr;
   AVCodecContext *codecCtx = nullptr;
   AVStream *outStream = nullptr;
+  AVStream *inStream = nullptr;
   SwsContext *swsCtx = nullptr;
   AVPacket *packet = nullptr;
   AVFrame *encFrame = nullptr;
-  int width, height;
-  AVRational timeBase;
 };
 
 // --- Video Processor Class ---
@@ -255,6 +278,7 @@ VideoProcessor::~VideoProcessor() {}
 bool VideoProcessor::processConfig(const std::string &initSegmentPath,
                                    const std::string &mediaSegmentPath,
                                    const std::string &outputDir) {
+  Metrics::getInstance().startProcessing();
   std::string tempInput = "temp_full_input.mp4";
 
   {
@@ -278,8 +302,7 @@ bool VideoProcessor::processConfig(const std::string &initSegmentPath,
   }
 
   std::string outputManifest = outputDir + "/manifest.mpd";
-  VideoEncoder encoder(outputManifest, decoder.getWidth(), decoder.getHeight(),
-                       decoder.getTimeBase());
+  VideoEncoder encoder(outputManifest, decoder.getStream());
   if (!encoder.open()) {
     std::cerr << "Failed to open output video" << std::endl;
     return false;
@@ -295,6 +318,9 @@ bool VideoProcessor::processConfig(const std::string &initSegmentPath,
 
   encoder.flush();
   fs::remove(tempInput);
+
+  Metrics::getInstance().stopProcessing();
+  Metrics::getInstance().printMetrics();
 
   return true;
 }

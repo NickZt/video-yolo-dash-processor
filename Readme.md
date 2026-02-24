@@ -43,3 +43,19 @@ video_processor /home/nickzt/W&W/KnowlegeGator/init.dash /home/nickzt/W&W/Knowle
 [libx264 @ 0x5bf8e5e1b040] ref B L1: 97.1%  2.9%
 [libx264 @ 0x5bf8e5e1b040] kb/s:361.98
 Processing completed successfully.
+Next step
+Demux
+↓
+Decode (libavcodec)
+↓
+Frame (YUV420p AVFrame)
+↓
+Preprocess Worker
+↓
+ONNX Runtime
+↓
+Mask Apply (in Y plane)
+↓
+Encode
+↓
+Mux (fragmented mp4)
