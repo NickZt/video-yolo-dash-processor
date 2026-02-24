@@ -353,4 +353,5 @@ void VideoProcessor::processFrame(cv::Mat &frame) {
       }
     }
   }
+  Metrics::getInstance().incrementFramesInferred();
 }
