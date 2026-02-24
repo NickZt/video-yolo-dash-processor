@@ -196,9 +196,8 @@ public:
     av_dict_set(&opts, "window_size", "5", 0);
     av_dict_set(&opts, "extra_window_size", "5", 0);
     av_dict_set(&opts, "seg_duration", "2", 0);
-    av_dict_set(&opts, "init_seg_name", "init.dash", 0);
-    av_dict_set(&opts, "media_seg_name", "segment$Number$.m4s", 0);
-    av_dict_set(&opts, "allowed_extensions", "ALL", 0);
+    av_dict_set(&opts, "init_seg_name", "init.mp4", 0);
+    av_dict_set(&opts, "media_seg_name", "chunk-$Number$.m4s", 0);
 
     if (!(fmtCtx->oformat->flags & AVFMT_NOFILE)) {
       if (avio_open(&fmtCtx->pb, outputPath.c_str(), AVIO_FLAG_WRITE) < 0)
@@ -308,7 +307,11 @@ bool VideoProcessor::processConfig(const std::string &initSegmentPath,
 
   Metrics::getInstance().setFrameSize(decoder.getWidth(), decoder.getHeight());
 
-  std::string outputFileName = outputDir + "/manifest.mpd";
+  std::string cleanOutputDir = outputDir;
+  if (!cleanOutputDir.empty() && cleanOutputDir.back() == '/') {
+    cleanOutputDir.pop_back();
+  }
+  std::string outputFileName = cleanOutputDir + "/manifest.mpd";
   VideoEncoder encoder(outputFileName, decoder.getStream());
   if (!encoder.open()) {
     std::cerr << "Failed to open output video" << std::endl;
@@ -363,10 +366,13 @@ void VideoProcessor::processFrame(cv::Mat &frame) {
             mask_roi.height == bbox.height) {
           cv::Mat valid_mask = det.mask(mask_roi).clone();
           if (!valid_mask.empty() && valid_mask.type() == CV_8UC1) {
+            if (!saved_debug_frame) {
+              cv::imwrite("pre_mask.jpg", frame);
+            }
             frame(bbox).setTo(cv::Scalar(0, 0, 0), valid_mask);
             std::cout << "SUCCESS: Mask painted on frame!" << std::endl;
             if (!saved_debug_frame) {
-              cv::imwrite("debug_frame.jpg", frame);
+              cv::imwrite("post_mask.jpg", frame);
               saved_debug_frame = true;
             }
           }
