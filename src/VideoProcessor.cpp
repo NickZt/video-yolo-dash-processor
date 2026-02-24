@@ -332,19 +332,12 @@ void VideoProcessor::processFrame(cv::Mat &frame) {
   yolo->infer_image(frame);
   const std::vector<OutputSeg> &output = yolo->getOutputSeg();
 
-  static bool saved_debug_frame = false;
-
   for (const auto &det : output) {
     if (det.id == 0) { // Person
-      std::cout << "Person Detected! Bounding box area: " << det.box.area()
-                << std::endl;
       // intersection with frame
       cv::Rect bbox = det.box & cv::Rect(0, 0, frame.cols, frame.rows);
 
       if (bbox.area() > 0 && !det.mask.empty()) {
-        std::cout << "Valid BBox and Non-Empty Mask! Mask cols: "
-                  << det.mask.cols << ", rows: " << det.mask.rows << std::endl;
-
         // det.mask corresponds to det.box. We need to crop it to bbox.
         // The offset is the difference between bbox.tl() and det.box.tl()
         cv::Rect mask_roi(bbox.x - det.box.x, bbox.y - det.box.y, bbox.width,
@@ -357,22 +350,10 @@ void VideoProcessor::processFrame(cv::Mat &frame) {
             mask_roi.height == bbox.height) {
           cv::Mat valid_mask = det.mask(mask_roi).clone();
           if (!valid_mask.empty() && valid_mask.type() == CV_8UC1) {
-            if (!saved_debug_frame) {
-              cv::imwrite("pre_mask.jpg", frame);
-            }
             frame(bbox).setTo(cv::Scalar(0, 0, 0), valid_mask);
-            std::cout << "SUCCESS: Mask painted on frame!" << std::endl;
-            if (!saved_debug_frame) {
-              cv::imwrite("post_mask.jpg", frame);
-              saved_debug_frame = true;
-            }
+            std::cout << "Detected obj (person) mask painted\n";
           }
-        } else {
-          std::cout << "FAILED: mask_roi area zero or dimension mismatch."
-                    << std::endl;
         }
-      } else {
-        std::cout << "FAILED: bbox area 0 or det.mask is empty!" << std::endl;
       }
     }
   }
