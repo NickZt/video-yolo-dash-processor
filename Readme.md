@@ -95,18 +95,6 @@ Multi-Inference Worker
 
 in YOLO abstraction base class, it relies on shared mutable state blocks (e.g. m_image memory pools). This means we cannot simply share 1 YOLO instance across multiple threads natively.
 Thread Pool: Spin up a pool of N inference threads (e.g., matching half your CPU core count)
-=== Video Processing Metrics ===
-Frame Size: 960x540
-Total Time: 15345 ms
-Frames Decoded: 189
-Frames Inferred: 189
-Frames Encoded: 189
-Average FPS: 12.3167
-Average Time to Frame (T2F): 7.21607 ms
-Average Time to Conversion (TTC): 3.30453 ms
-Average Time to Inference (TTI): 780.655 ms
-Local Memory Spaces
-Re-Order Matrix Muxing
 
 === Video Processing Metrics ===
 Hardware Concurrency: 20 Cores
@@ -145,4 +133,23 @@ Average Time to Frame (T2F): 2.2161 ms
 Average Time to Conversion (TTC): 1.19051 ms
 Average Time to Inference (TTI): 336.523 ms
 
+Better control for inference, inference used 10 threads, as in the previous example before using multiworker. Average frames per second: 23.6486, but now it is better controlled, and we have an average frames per second: 28.1963 on the same hardware
 
+Disable implicit OpenCV multi-threading to prevent OS thread thrashing since we are already spawning N hardware-concurrent Inference Workers.
+cv::setNumThreads(1);
+If threads == 1, OpenCV will disable threading optimizations and run its
+functions sequentially. This adds 1 frame per second )
+
+=== Video Processing Metrics ===
+Hardware Concurrency: 20 Cores
+Inference Workers: 10 Threads
+Frame Size: 960x540
+Total Time: 6532 ms
+Frames Decoded: 189
+Frames Inferred: 189
+Frames Encoded: 189
+Average FPS: 28.9345
+Average Time to Frame (T2F): 3.08831 ms
+Average Time to Conversion (TTC): 1.702 ms
+Average Time to Inference (TTI): 329.949 ms
+================================

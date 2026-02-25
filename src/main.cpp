@@ -1,10 +1,15 @@
 #include "VideoProcessor.h"
 #include <filesystem>
 #include <iostream>
+#include <opencv2/core.hpp>
 
 namespace fs = std::filesystem;
 
 int main(int argc, char *argv[]) {
+  //  If threads == 1, OpenCV will disable threading optimizations and run its
+  // functions sequentially.
+ cv::setNumThreads(1);
+
   if (argc < 5) {
     std::cerr << "Usage: " << argv[0]
               << " <init_segment> <media_segment> <output_dir> <model_path>"
