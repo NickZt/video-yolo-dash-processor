@@ -1,25 +1,29 @@
 
 Download model to model folder
+````
 python3 -c "from ultralytics import YOLO; model = YOLO('yolov8n-seg.pt'); model.export(format='onnx')" && mv yolov8n-seg.onnx model/
-
+````
 python script to print ONNX model output shapes
-
+````
 python3 -c "import onnxruntime as ort; session = ort.InferenceSession('../model/yolov8n-seg.onnx'); print([o.shape for o in session.get_outputs()])"
-
+````
 Compile the code
-
+````
 cd build && cmake .. && make -j$(nproc)
+````
 
-
+````
 ffmpeg -f lavfi -i testsrc=duration=1:size=640x480:rate=10 -c:v libx264 -y test.mp4 && touch empty_init.mp4
-
+````
 cd build && ./video_processor ../empty_init.mp4 ../test.mp4 ../out_dir ../model/yolov8n-seg.onnx
 
 yolo export model=yolov8n-seg.pt format=onnx opset=18
 
 video_processor ~/init.dash ~/segment1.m4s output_dir/ ../model/yolov8n-seg.onnx
 
+````
 cd build && make -j$(nproc) && mkdir -p output_dir7 && ./video_processor "~/init.dash" "~/segment1.m4s" output_dir7/ ../model/yolov8n-seg.onnx && ls -la output_dir7/
+
 [  9%] Building CXX object CMakeFiles/video_processor.dir/src/VideoProcessor.cpp.o
 [ 18%] Linking CXX executable video_processor
 [100%] Built target video_processor
@@ -44,8 +48,11 @@ Detected obj (person) mask painted
 [libx264 @ 0x622f39eb66c0] ref B L0: 78.7% 17.0%  4.2%
 [libx264 @ 0x622f39eb66c0] ref B L1: 91.1%  8.9%
 [libx264 @ 0x622f39eb66c0] kb/s:351.06
+````
 
 Before optimization start. 
+
+````
 === Video Processing Metrics ===
 Frame Size: 960x540
 Total Time: 8258 ms
@@ -63,8 +70,10 @@ Processing completed successfully.
 Process finished with exit code 0
 
 chunk-1.m4s  init.mp4  manifest.mpd
+````
+Zero-Copy YUV Masking
 
-The multi-threading implementation
+````
 
 === Video Processing Metrics ===
 Frame Size: 960x540
@@ -77,8 +86,11 @@ Average Time to Frame (T2F): 1.33232 ms
 Average Time to Conversion (TTC): 0.468198 ms
 Average Time to Inference (TTI): 42.1632 ms
 
+````
 
 Zero-Copy YUV Masking
+
+````
 === Video Processing Metrics ===
 Frame Size: 960x540
 Total Time: 7992 ms
@@ -90,12 +102,14 @@ Average Time to Frame (T2F): 1.49884 ms
 Average Time to Conversion (TTC): 0.48923 ms
 Average Time to Inference (TTI): 41.9236 ms
 
-Next
+````
+
 Multi-Inference Worker
 
 in YOLO abstraction base class, it relies on shared mutable state blocks (e.g. m_image memory pools). This means we cannot simply share 1 YOLO instance across multiple threads natively.
 Thread Pool: Spin up a pool of N inference threads (e.g., matching half your CPU core count)
 
+````
 === Video Processing Metrics ===
 Hardware Concurrency: 20 Cores
 Inference Workers: 10 Threads
@@ -110,6 +124,8 @@ Average Time to Conversion (TTC): 4.53343 ms
 Average Time to Inference (TTI): 890.229 ms
 ================================
 
+````
+
 This is because 10 independent ONNX sessions are currently defaulting to using all 10 CPU cores each, creating a 100-thread thrashing bottleneck.
 session_options.SetIntraOpNumThreads(std::thread::hardware_concurrency() / 2);
 in Ort::SessionOptions::SessionOptions
@@ -120,6 +136,7 @@ added optimization session_options.SetIntraOpNumThreads(1);
 session_options.SetInterOpNumThreads(1);
 this limits every worker instance to use only 1 thread
 Result is
+````
 === Video Processing Metrics ===
 Hardware Concurrency: 20 Cores
 Inference Workers: 10 Threads
@@ -132,7 +149,7 @@ Average FPS: 28.1963
 Average Time to Frame (T2F): 2.2161 ms
 Average Time to Conversion (TTC): 1.19051 ms
 Average Time to Inference (TTI): 336.523 ms
-
+````
 Better control for inference, inference used 10 threads, as in the previous example before using multiworker. Average frames per second: 23.6486, but now it is better controlled, and we have an average frames per second: 28.1963 on the same hardware
 
 Disable implicit OpenCV multi-threading to prevent OS thread thrashing since we are already spawning N hardware-concurrent Inference Workers.
@@ -140,16 +157,23 @@ cv::setNumThreads(1);
 If threads == 1, OpenCV will disable threading optimizations and run its
 functions sequentially. This adds 1 frame per second )
 
+````
 === Video Processing Metrics ===
 Hardware Concurrency: 20 Cores
+
 Inference Workers: 10 Threads
+
 Frame Size: 960x540
+
 Total Time: 6532 ms
+
 Frames Decoded: 189
+
 Frames Inferred: 189
 Frames Encoded: 189
+
 Average FPS: 28.9345
 Average Time to Frame (T2F): 3.08831 ms
 Average Time to Conversion (TTC): 1.702 ms
 Average Time to Inference (TTI): 329.949 ms
-================================
+````
