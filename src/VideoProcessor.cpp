@@ -80,7 +80,7 @@ public:
     return true;
   }
 
-  bool readFrame(cv::Mat &outFrame, int64_t &outPts) {
+  bool readFrame(cv::Mat &outFrame, AVFrame *&outYuvFrame, int64_t &outPts) {
     auto t0 = std::chrono::high_resolution_clock::now();
     while (av_read_frame(fmtCtx, packet) >= 0) {
       if (packet->stream_index == videoStreamIdx) {
@@ -97,6 +97,7 @@ public:
             outFrame = cv::Mat(frame->height, frame->width, CV_8UC3,
                                frameBGR->data[0], frameBGR->linesize[0])
                            .clone();
+            outYuvFrame = av_frame_clone(frame);
             outPts = frame->pts;
             av_packet_unref(packet);
 
@@ -209,18 +210,14 @@ public:
     return true;
   }
 
-  void writeFrame(const cv::Mat &frame, int64_t pts) {
-    const uint8_t *data[1] = {frame.data};
-    int linesize[1] = {static_cast<int>(frame.step)};
+  void writeFrame(AVFrame *yuvFrame, int64_t pts) {
+    yuvFrame->pts = pts;
 
-    sws_scale(swsCtx, data, linesize, 0, codecCtx->height, encFrame->data,
-              encFrame->linesize);
-    encFrame->pts = pts;
-
-    if (avcodec_send_frame(codecCtx, encFrame) == 0) {
+    if (avcodec_send_frame(codecCtx, yuvFrame) == 0) {
       receiveAndWritePackets();
     }
     Metrics::getInstance().incrementFramesEncoded();
+    av_frame_free(&yuvFrame);
   }
 
   void flush() {
@@ -314,10 +311,12 @@ bool VideoProcessor::processConfig(const std::string &initSegmentPath,
 
   std::thread decodeThread([&]() {
     cv::Mat frame;
+    AVFrame *yuvFrame = nullptr;
     int64_t pts;
-    while (decoder.readFrame(frame, pts)) {
+    while (decoder.readFrame(frame, yuvFrame, pts)) {
       FramePayload payload;
       payload.frameBGR = frame;
+      payload.yuvFrame = yuvFrame;
       payload.pts = pts;
       payload.isValid = true;
       decodeQueue.push(payload);
@@ -336,7 +335,7 @@ bool VideoProcessor::processConfig(const std::string &initSegmentPath,
       }
       FramePayload payload = *payloadOpt;
       if (payload.isValid) {
-        processFrame(payload.frameBGR);
+        processFrame(payload.frameBGR, payload.yuvFrame);
       }
       inferenceQueue.push(payload);
     }
@@ -354,7 +353,7 @@ bool VideoProcessor::processConfig(const std::string &initSegmentPath,
     }
     FramePayload payload = *payloadOpt;
     if (payload.isValid) {
-      encoder.writeFrame(payload.frameBGR, payload.pts);
+      encoder.writeFrame(payload.yuvFrame, payload.pts);
     }
   }
 
@@ -370,11 +369,15 @@ bool VideoProcessor::processConfig(const std::string &initSegmentPath,
   return true;
 }
 
-void VideoProcessor::processFrame(cv::Mat &frame) {
+void VideoProcessor::processFrame(cv::Mat &frame, AVFrame *yuvFrame) {
   auto t0 = std::chrono::high_resolution_clock::now();
 
   yolo->infer_image(frame);
   const std::vector<OutputSeg> &output = yolo->getOutputSeg();
+
+  // Create zero-copy cv::Mat wrapper around the hardware Y-plane (Luminance)
+  cv::Mat y_plane(yuvFrame->height, yuvFrame->width, CV_8UC1, yuvFrame->data[0],
+                  yuvFrame->linesize[0]);
 
   for (const auto &det : output) {
     if (det.id == 0) { // Person
@@ -394,7 +397,11 @@ void VideoProcessor::processFrame(cv::Mat &frame) {
             mask_roi.height == bbox.height) {
           cv::Mat valid_mask = det.mask(mask_roi).clone();
           if (!valid_mask.empty() && valid_mask.type() == CV_8UC1) {
+            // Apply mask to BGR frame (optional, for visual debugging)
             frame(bbox).setTo(cv::Scalar(0, 0, 0), valid_mask);
+            // Apply mask directly to the Zero-Copy YUV hardware frame buffer
+            // Sets luminance to 0 (black in YUV space) where the mask is active
+            y_plane(bbox).setTo(0, valid_mask);
             std::cout << "Detected obj (person) mask painted\n";
           }
         }

@@ -12,8 +12,11 @@
 #include "ThreadSafeQueue.h"
 #include "yolo/yolo_segment.h"
 
+struct AVFrame;
+
 struct FramePayload {
-  cv::Mat frameBGR; // For Inference
+  cv::Mat frameBGR;            // For Inference
+  AVFrame *yuvFrame = nullptr; // Original decoded frame from demuxer
   int64_t pts;
   bool isValid = true;
 };
@@ -39,5 +42,5 @@ private:
   std::atomic<bool> isDecodingFinished{false};
   std::atomic<bool> isInferenceFinished{false};
 
-  void processFrame(cv::Mat &frame);
+  void processFrame(cv::Mat &frame, AVFrame *yuvFrame);
 };

@@ -59,7 +59,7 @@ Process finished with exit code 0
 
 chunk-1.m4s  init.mp4  manifest.mpd
 
-The multi-threading implementation is running smoothly, and achieving ~23-25 FPS with parallel Decoder, Inference, and Encoder threads is very near real-time performance
+The multi-threading implementation
 
 === Video Processing Metrics ===
 Frame Size: 960x540
@@ -72,23 +72,18 @@ Average Time to Frame (T2F): 1.33232 ms
 Average Time to Conversion (TTC): 0.468198 ms
 Average Time to Inference (TTI): 42.1632 ms
 
-Next step
-Demux
-↓
-Decode (libavcodec)
-↓
-Frame (YUV420p AVFrame)
-↓
-Preprocess Worker
-↓
-ONNX Runtime
-↓
-Mask Apply (in Y plane)
-↓
-Encode
-↓
-Mux (fragmented mp4)
 
+Zero-Copy YUV Masking
+=== Video Processing Metrics ===
+Frame Size: 960x540
+Total Time: 7992 ms
+Frames Decoded: 189
+Frames Inferred: 189
+Frames Encoded: 189
+Average FPS: 23.6486
+Average Time to Frame (T2F): 1.49884 ms
+Average Time to Conversion (TTC): 0.48923 ms
+Average Time to Inference (TTI): 41.9236 ms
 
 python script to print ONNX model output shapes
 
