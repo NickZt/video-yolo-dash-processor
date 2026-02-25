@@ -309,13 +309,57 @@ bool VideoProcessor::processConfig(const std::string &initSegmentPath,
     return false;
   }
 
-  cv::Mat frame;
-  int64_t pts;
+  isDecodingFinished = false;
+  isInferenceFinished = false;
 
-  while (decoder.readFrame(frame, pts)) {
-    processFrame(frame);
-    encoder.writeFrame(frame, pts);
+  std::thread decodeThread([&]() {
+    cv::Mat frame;
+    int64_t pts;
+    while (decoder.readFrame(frame, pts)) {
+      FramePayload payload;
+      payload.frameBGR = frame;
+      payload.pts = pts;
+      payload.isValid = true;
+      decodeQueue.push(payload);
+    }
+    isDecodingFinished = true;
+    decodeQueue.close();
+  });
+
+  std::thread inferenceThread([this]() {
+    while (true) {
+      auto payloadOpt = decodeQueue.pop();
+      if (!payloadOpt) {
+        if (isDecodingFinished)
+          break;
+        continue;
+      }
+      FramePayload payload = *payloadOpt;
+      if (payload.isValid) {
+        processFrame(payload.frameBGR);
+      }
+      inferenceQueue.push(payload);
+    }
+    isInferenceFinished = true;
+    inferenceQueue.close();
+  });
+
+  // Mux / Encode on Main Thread
+  while (true) {
+    auto payloadOpt = inferenceQueue.pop();
+    if (!payloadOpt) {
+      if (isInferenceFinished)
+        break;
+      continue;
+    }
+    FramePayload payload = *payloadOpt;
+    if (payload.isValid) {
+      encoder.writeFrame(payload.frameBGR, payload.pts);
+    }
   }
+
+  decodeThread.join();
+  inferenceThread.join();
 
   encoder.flush();
   fs::remove(tempInput);
