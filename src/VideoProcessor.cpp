@@ -251,18 +251,23 @@ private:
 
 VideoProcessor::VideoProcessor(const std::string &modelPath)
     : modelPath(modelPath) {
-  std::unique_ptr<YOLO> base_yolo = CreateFactory::instance().create(
-      Backend_Type::ONNXRuntime, Task_Type::Segment);
+  numInferenceThreads = std::max(1u, std::thread::hardware_concurrency() / 2); //Right now this for stability. In test it will be set to 10 or 20 for Intel 13g have doubts about its energy eff cores
 
-  if (!base_yolo) {
-    throw std::runtime_error("Failed to create YOLO model instance.");
+  for (int i = 0; i < numInferenceThreads; ++i) {
+    std::unique_ptr<YOLO> base_yolo = CreateFactory::instance().create(
+        Backend_Type::ONNXRuntime, Task_Type::Segment);
+
+    if (!base_yolo) {
+      throw std::runtime_error("Failed to create YOLO model instance.");
+    }
+
+    auto yolo_instance = std::unique_ptr<YOLO_Segment>(
+        dynamic_cast<YOLO_Segment *>(base_yolo.release()));
+
+    // Defaulting to CPU FP32 for now
+    yolo_instance->init(YOLOv8, CPU, FP32, modelPath);
+    yoloPool.push_back(std::move(yolo_instance));
   }
-
-  yolo = std::unique_ptr<YOLO_Segment>(
-      dynamic_cast<YOLO_Segment *>(base_yolo.release()));
-  // Depending on system architecture, fallback to CPU might be necessary, but
-  // defaulting to GPU for performance if available
-  yolo->init(YOLOv8, CPU, FP32, modelPath);
 }
 
 VideoProcessor::~VideoProcessor() {}
@@ -307,7 +312,6 @@ bool VideoProcessor::processConfig(const std::string &initSegmentPath,
   }
 
   isDecodingFinished = false;
-  isInferenceFinished = false;
 
   std::thread decodeThread([&]() {
     cv::Mat frame;
@@ -325,40 +329,67 @@ bool VideoProcessor::processConfig(const std::string &initSegmentPath,
     decodeQueue.close();
   });
 
-  std::thread inferenceThread([this]() {
-    while (true) {
-      auto payloadOpt = decodeQueue.pop();
-      if (!payloadOpt) {
-        if (isDecodingFinished)
-          break;
-        continue;
+  activeInferenceThreads = numInferenceThreads;
+  std::vector<std::thread> inferenceThreads;
+  for (int i = 0; i < numInferenceThreads; ++i) {
+    inferenceThreads.emplace_back([this, i]() {
+      while (true) {
+        auto payloadOpt = decodeQueue.pop();
+        if (!payloadOpt) {
+          if (isDecodingFinished)
+            break;
+          continue;
+        }
+        FramePayload payload = *payloadOpt;
+        if (payload.isValid) {
+          processFrame(payload.frameBGR, payload.yuvFrame, yoloPool[i].get());
+        }
+        inferenceQueue.push(payload);
       }
-      FramePayload payload = *payloadOpt;
-      if (payload.isValid) {
-        processFrame(payload.frameBGR, payload.yuvFrame);
+      if (--activeInferenceThreads == 0) {
+        inferenceQueue.close();
       }
-      inferenceQueue.push(payload);
-    }
-    isInferenceFinished = true;
-    inferenceQueue.close();
-  });
+    });
+  }
 
   // Mux / Encode on Main Thread
+  std::map<int64_t, FramePayload> reorderBuffer;
+  int64_t expected_pts = 0;
+
   while (true) {
     auto payloadOpt = inferenceQueue.pop();
     if (!payloadOpt) {
-      if (isInferenceFinished)
+      if (activeInferenceThreads == 0 && inferenceQueue.size() == 0) {
         break;
+      }
       continue;
     }
     FramePayload payload = *payloadOpt;
-    if (payload.isValid) {
-      encoder.writeFrame(payload.yuvFrame, payload.pts);
+    reorderBuffer[payload.pts] = payload;
+
+    // Output all consecutive frames
+    while (!reorderBuffer.empty() &&
+           reorderBuffer.begin()->first == expected_pts) {
+      auto it = reorderBuffer.begin();
+      if (it->second.isValid) {
+        encoder.writeFrame(it->second.yuvFrame, it->second.pts);
+      }
+      reorderBuffer.erase(it);
+      expected_pts++;
+    }
+  }
+
+  // Flush any remaining frames in buffer just in case
+  for (auto &pair : reorderBuffer) {
+    if (pair.second.isValid) {
+      encoder.writeFrame(pair.second.yuvFrame, pair.second.pts);
     }
   }
 
   decodeThread.join();
-  inferenceThread.join();
+  for (auto &t : inferenceThreads) {
+    t.join();
+  }
 
   encoder.flush();
   fs::remove(tempInput);
@@ -369,7 +400,8 @@ bool VideoProcessor::processConfig(const std::string &initSegmentPath,
   return true;
 }
 
-void VideoProcessor::processFrame(cv::Mat &frame, AVFrame *yuvFrame) {
+void VideoProcessor::processFrame(cv::Mat &frame, AVFrame *yuvFrame,
+                                  YOLO_Segment *yolo) {
   auto t0 = std::chrono::high_resolution_clock::now();
 
   yolo->infer_image(frame);

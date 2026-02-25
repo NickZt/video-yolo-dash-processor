@@ -32,7 +32,8 @@ public:
 
 private:
   std::string modelPath;
-  std::unique_ptr<YOLO_Segment> yolo;
+  int numInferenceThreads;
+  std::vector<std::unique_ptr<YOLO_Segment>> yoloPool;
 
   // Queues
   ThreadSafeQueue<FramePayload> decodeQueue{50};
@@ -40,7 +41,7 @@ private:
 
   // State
   std::atomic<bool> isDecodingFinished{false};
-  std::atomic<bool> isInferenceFinished{false};
+  std::atomic<int> activeInferenceThreads{0};
 
-  void processFrame(cv::Mat &frame, AVFrame *yuvFrame);
+  void processFrame(cv::Mat &frame, AVFrame *yuvFrame, YOLO_Segment *yolo);
 };

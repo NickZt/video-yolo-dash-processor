@@ -41,6 +41,7 @@ Detected obj (person) mask painted
 [libx264 @ 0x622f39eb66c0] ref B L1: 91.1%  8.9%
 [libx264 @ 0x622f39eb66c0] kb/s:351.06
 
+Before optimization start. 
 === Video Processing Metrics ===
 Frame Size: 960x540
 Total Time: 8258 ms
@@ -84,6 +85,25 @@ Average FPS: 23.6486
 Average Time to Frame (T2F): 1.49884 ms
 Average Time to Conversion (TTC): 0.48923 ms
 Average Time to Inference (TTI): 41.9236 ms
+
+Next
+Multi-Inference Worker
+
+in YOLO abstraction base class, it relies on shared mutable state blocks (e.g. m_image memory pools). This means we cannot simply share 1 YOLO instance across multiple threads natively.
+Thread Pool: Spin up a pool of N inference threads (e.g., matching half your CPU core count)
+=== Video Processing Metrics ===
+Frame Size: 960x540
+Total Time: 15345 ms
+Frames Decoded: 189
+Frames Inferred: 189
+Frames Encoded: 189
+Average FPS: 12.3167
+Average Time to Frame (T2F): 7.21607 ms
+Average Time to Conversion (TTC): 3.30453 ms
+Average Time to Inference (TTI): 780.655 ms
+Local Memory Spaces
+Re-Order Matrix Muxing: Because Thread 2 might finish identifying a frame faster than Thread 1 depending on model complexity, the Encoder thread will begin receiving frames out-of-order. I will build an std::map<int64_t, FramePayload> keyed strictly by pts. The Muxer will buffer these completed mask frames into the map and encode them sequentially to guarantee playback order isn't corrupted.
+
 
 python script to print ONNX model output shapes
 
