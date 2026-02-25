@@ -2,6 +2,10 @@
 Download model to model folder
 python3 -c "from ultralytics import YOLO; model = YOLO('yolov8n-seg.pt'); model.export(format='onnx')" && mv yolov8n-seg.onnx model/
 
+python script to print ONNX model output shapes
+
+python3 -c "import onnxruntime as ort; session = ort.InferenceSession('../model/yolov8n-seg.onnx'); print([o.shape for o in session.get_outputs()])"
+
 Compile the code
 
 cd build && cmake .. && make -j$(nproc)
@@ -102,7 +106,7 @@ Average Time to Frame (T2F): 7.21607 ms
 Average Time to Conversion (TTC): 3.30453 ms
 Average Time to Inference (TTI): 780.655 ms
 Local Memory Spaces
-Re-Order Matrix Muxing: Because Thread 2 might finish identifying a frame faster than Thread 1 depending on model complexity, the Encoder thread will begin receiving frames out-of-order. I will build an std::map<int64_t, FramePayload> keyed strictly by pts. The Muxer will buffer these completed mask frames into the map and encode them sequentially to guarantee playback order isn't corrupted.
+Re-Order Matrix Muxing
 
 === Video Processing Metrics ===
 Hardware Concurrency: 20 Cores
@@ -117,8 +121,28 @@ Average Time to Frame (T2F): 6.70182 ms
 Average Time to Conversion (TTC): 4.53343 ms
 Average Time to Inference (TTI): 890.229 ms
 ================================
-This is because 10 independent ONNX sessions are currently defaulting to using all 20 CPU cores each, creating a 200-thread thrashing bottleneck.
 
-python script to print ONNX model output shapes
+This is because 10 independent ONNX sessions are currently defaulting to using all 10 CPU cores each, creating a 100-thread thrashing bottleneck.
+session_options.SetIntraOpNumThreads(std::thread::hardware_concurrency() / 2);
+in Ort::SessionOptions::SessionOptions
 
-python3 -c "import onnxruntime as ort; session = ort.InferenceSession('../model/yolov8n-seg.onnx'); print([o.shape for o in session.get_outputs()])"
+Then
+
+added optimization session_options.SetIntraOpNumThreads(1);
+session_options.SetInterOpNumThreads(1);
+this limits every worker instance to use only 1 thread
+Result is
+=== Video Processing Metrics ===
+Hardware Concurrency: 20 Cores
+Inference Workers: 10 Threads
+Frame Size: 960x540
+Total Time: 6703 ms
+Frames Decoded: 189
+Frames Inferred: 189
+Frames Encoded: 189
+Average FPS: 28.1963
+Average Time to Frame (T2F): 2.2161 ms
+Average Time to Conversion (TTC): 1.19051 ms
+Average Time to Inference (TTI): 336.523 ms
+
+
