@@ -104,6 +104,20 @@ Average Time to Inference (TTI): 780.655 ms
 Local Memory Spaces
 Re-Order Matrix Muxing: Because Thread 2 might finish identifying a frame faster than Thread 1 depending on model complexity, the Encoder thread will begin receiving frames out-of-order. I will build an std::map<int64_t, FramePayload> keyed strictly by pts. The Muxer will buffer these completed mask frames into the map and encode them sequentially to guarantee playback order isn't corrupted.
 
+=== Video Processing Metrics ===
+Hardware Concurrency: 20 Cores
+Inference Workers: 10 Threads
+Frame Size: 960x540
+Total Time: 17439 ms
+Frames Decoded: 189
+Frames Inferred: 189
+Frames Encoded: 189
+Average FPS: 10.8378
+Average Time to Frame (T2F): 6.70182 ms
+Average Time to Conversion (TTC): 4.53343 ms
+Average Time to Inference (TTI): 890.229 ms
+================================
+This is because 10 independent ONNX sessions are currently defaulting to using all 20 CPU cores each, creating a 200-thread thrashing bottleneck.
 
 python script to print ONNX model output shapes
 

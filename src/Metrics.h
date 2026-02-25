@@ -40,6 +40,11 @@ public:
     frame_height.store(h);
   }
 
+  void setThreadInfo(int workers, int concurrency) {
+    num_workers.store(workers);
+    hw_concurrency.store(concurrency);
+  }
+
   void printMetrics() {
     auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(
                         end_time - start_time)
@@ -59,6 +64,9 @@ public:
                          : 0.0;
 
     std::cout << "\n=== Video Processing Metrics ===\n";
+    std::cout << "Hardware Concurrency: " << hw_concurrency.load()
+              << " Cores\n";
+    std::cout << "Inference Workers: " << num_workers.load() << " Threads\n";
     std::cout << "Frame Size: " << frame_width.load() << "x"
               << frame_height.load() << "\n";
     std::cout << "Total Time: " << duration << " ms\n";
@@ -78,6 +86,9 @@ private:
 
   std::atomic<int> frame_width{0};
   std::atomic<int> frame_height{0};
+
+  std::atomic<int> num_workers{0};
+  std::atomic<int> hw_concurrency{0};
 
   std::atomic<int> frames_decoded{0};
   std::atomic<int> frames_inferred{0};

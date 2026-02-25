@@ -251,7 +251,12 @@ private:
 
 VideoProcessor::VideoProcessor(const std::string &modelPath)
     : modelPath(modelPath) {
-  numInferenceThreads = std::max(1u, std::thread::hardware_concurrency() / 2); //Right now this for stability. In test it will be set to 10 or 20 for Intel 13g have doubts about its energy eff cores
+  numInferenceThreads = std::max(
+      1u, std::thread::hardware_concurrency() /
+              2); // Right now this for stability. In test it will be set to 10
+                  // or 20 for Intel 13g have doubts about its energy eff cores
+  Metrics::getInstance().setThreadInfo(numInferenceThreads,
+                                       std::thread::hardware_concurrency());
 
   for (int i = 0; i < numInferenceThreads; ++i) {
     std::unique_ptr<YOLO> base_yolo = CreateFactory::instance().create(
