@@ -79,3 +79,16 @@ The output will automatically bundle and format into a playable, highly-optimize
 Now that the core zero-copy, multi-threaded C++ inference pipeline is stable at 29 FPS, the foundation is set for heavier, state-of-the-art workloads. 
 
 **Coming next to the roster: Grounding DINO integration.** Stay tuned!
+
+## Acknowledgments
+
+Special thanks to the following open-source projects and developers whose foundational work made this optimized pipeline possible:
+
+* **[taifyang/yolo-inference](https://github.com/taifyang/yolo-inference)**: For providing an excellent foundation and abstraction API for ONNX/TensorRT bounding-box and segmentation extraction in C++. It extensively influenced the YOLO tensor integrations used here.
+* **[FFmpeg](https://ffmpeg.org/)**: For the unparalleled hardware decoding and H.264 DASH payload mapping backbone.
+* **[OpenCV](https://opencv.org/)**: For matrix manipulations and masking layers.
+* **[ONNX Runtime](https://onnxruntime.ai/)**: The primary Machine Learning inference engine driving the zero-copy node.
+
+## License
+
+This project and its original source logic are provided under the **Creative Commons Attribution-NonCommercial 4.0 International (CC BY-NC 4.0)** License. See the `LICENSE` file for full disclosure.
