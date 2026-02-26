@@ -177,3 +177,27 @@ Average Time to Frame (T2F): 3.08831 ms
 Average Time to Conversion (TTC): 1.702 ms
 Average Time to Inference (TTI): 329.949 ms
 ````
+
+Grounding DINO
+
+
+python3 -c "from huggingface_hub import hf_hub_download; hf_hub_download(repo_id='onnx-community/grounding-dino-tiny-ONNX', filename='onnx/model.onnx', local_dir='test_assets')"
+
+mv test_assets/onnx/model.onnx test_assets/groundingdino.onnx && rm -rf test_assets/onnx && ./build/video_processor --engine dino --media test_assets/dash_720p/chunk-1.m4s --init test_assets/dash_720p/init.dash --out test_dino_output/ --model test_assets/groundingdino.onnx --prompt "white square ."
+
+# Extract DASH chunks to simulate the live video stream ingest
+cd test_assets/dash_4k && ffmpeg -re -i ../test_4k.mp4 -c:v copy -f dash -window_size 5 -extra_window_size 5 -seg_duration 2 -init_seg_name init.dash -media_seg_name chunk-\$Number\$.m4s manifest.mpd
+cd ../dash_1080p && ffmpeg -re -i ../test_1080p.mp4 -c:v copy -f dash -window_size 5 -extra_window_size 5 -seg_duration 2 -init_seg_name init.dash -media_seg_name chunk-\$Number\$.m4s manifest.mpd
+cd ../dash_720p && ffmpeg -re -i ../test_720p.mp4 -c:v copy -f dash -window_size 5 -extra_window_size 5 -seg_duration 2 -init_seg_name init.dash -media_seg_name chunk-\$Number\$.m4s manifest.mpd
+
+ffmpeg -y -f lavfi -i testsrc=size=3840x2160:rate=30 -vcodec libx264 -preset ultrafast -t 10 -pix_fmt yuv420p test_assets/test_4k.mp4 && ffmpeg -y -f lavfi -i testsrc=size=1920x1080:rate=30 -vcodec libx264 -preset ultrafast -t 10 -pix_fmt yuv420p test_assets/test_1080p.mp4 && ffmpeg -y -f lavfi -i testsrc=size=1280x720:rate=30 -vcodec libx264 -preset ultrafast -t 10 -pix_fmt yuv420p test_assets/test_720p.mp4
+
+# Extract DASH chunks to simulate the live video stream ingest
+cd test_assets/dash_4k && ffmpeg -re -i ../test_4k.mp4 -c:v copy -f dash -window_size 5 -extra_window_size 5 -seg_duration 2 -init_seg_name init.dash -media_seg_name chunk-\$Number\$.m4s manifest.mpd
+cd ../dash_1080p && ffmpeg -re -i ../test_1080p.mp4 -c:v copy -f dash -window_size 5 -extra_window_size 5 -seg_duration 2 -init_seg_name init.dash -media_seg_name chunk-\$Number\$.m4s manifest.mpd
+cd ../dash_720p && ffmpeg -re -i ../test_720p.mp4 -c:v copy -f dash -window_size 5 -extra_window_size 5 -seg_duration 2 -init_seg_name init.dash -media_seg_name chunk-\$Number\$.m4s manifest.mpd
+
+find test_assets -name "*.onnx"
+
+
+mv test_assets/onnx/model.onnx test_assets/groundingdino.onnx && rm -rf test_assets/onnx && ./build/video_processor --engine dino --media test_assets/dash_720p/chunk-1.m4s --init test_assets/dash_720p/init.dash --out test_dino_output/ --model test_assets/groundingdino.onnx --prompt "white square ."

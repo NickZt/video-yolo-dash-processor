@@ -249,8 +249,11 @@ private:
 
 // --- Video Processor Class ---
 
-VideoProcessor::VideoProcessor(const std::string &modelPath)
-    : modelPath(modelPath) {
+VideoProcessor::VideoProcessor(const std::map<std::string, std::string> &args)
+    : args(args) {
+  engineType = args.at("--engine");
+  std::string modelPath = args.at("--model");
+
   numInferenceThreads = std::max(
       1u, std::thread::hardware_concurrency() /
               2); // Right now this for stability. In test it will be set to 10
@@ -258,20 +261,28 @@ VideoProcessor::VideoProcessor(const std::string &modelPath)
   Metrics::getInstance().setThreadInfo(numInferenceThreads,
                                        std::thread::hardware_concurrency());
 
-  for (int i = 0; i < numInferenceThreads; ++i) {
-    std::unique_ptr<YOLO> base_yolo = CreateFactory::instance().create(
-        Backend_Type::ONNXRuntime, Task_Type::Segment);
+  if (engineType == "yolo") {
+    for (int i = 0; i < numInferenceThreads; ++i) {
+      std::unique_ptr<YOLO> base_yolo = CreateFactory::instance().create(
+          Backend_Type::ONNXRuntime, Task_Type::Segment);
 
-    if (!base_yolo) {
-      throw std::runtime_error("Failed to create YOLO model instance.");
+      if (!base_yolo) {
+        throw std::runtime_error("Failed to create YOLO model instance.");
+      }
+
+      auto yolo_instance = std::unique_ptr<YOLO_Segment>(
+          dynamic_cast<YOLO_Segment *>(base_yolo.release()));
+
+      // Defaulting to CPU FP32 for now
+      yolo_instance->init(YOLOv8, CPU, FP32, modelPath);
+      yoloPool.push_back(std::move(yolo_instance));
     }
-
-    auto yolo_instance = std::unique_ptr<YOLO_Segment>(
-        dynamic_cast<YOLO_Segment *>(base_yolo.release()));
-
-    // Defaulting to CPU FP32 for now
-    yolo_instance->init(YOLOv8, CPU, FP32, modelPath);
-    yoloPool.push_back(std::move(yolo_instance));
+  } else if (engineType == "dino") {
+    for (int i = 0; i < numInferenceThreads; ++i) {
+      auto dino_instance =
+          std::make_unique<GroundingDINO>(modelPath, 0.3f, "vocab.txt", 0.25f);
+      dinoPool.push_back(std::move(dino_instance));
+    }
   }
 }
 
@@ -347,7 +358,12 @@ bool VideoProcessor::processConfig(const std::string &initSegmentPath,
         }
         FramePayload payload = *payloadOpt;
         if (payload.isValid) {
-          processFrame(payload.frameBGR, payload.yuvFrame, yoloPool[i].get());
+          if (engineType == "yolo") {
+            processFrame(payload.frameBGR, payload.yuvFrame, yoloPool[i].get());
+          } else if (engineType == "dino") {
+            processFrameDino(payload.frameBGR, payload.yuvFrame,
+                             dinoPool[i].get(), args.at("--prompt"));
+          }
         }
         inferenceQueue.push(payload);
       }
@@ -443,6 +459,31 @@ void VideoProcessor::processFrame(cv::Mat &frame, AVFrame *yuvFrame,
           }
         }
       }
+    }
+  }
+
+  auto t1 = std::chrono::high_resolution_clock::now();
+  double inf_time = std::chrono::duration<double, std::milli>(t1 - t0).count();
+  Metrics::getInstance().addTimeToInference(inf_time);
+  Metrics::getInstance().incrementFramesInferred();
+}
+
+void VideoProcessor::processFrameDino(cv::Mat &frame, AVFrame *yuvFrame,
+                                      GroundingDINO *dino,
+                                      const std::string &prompt) {
+  auto t0 = std::chrono::high_resolution_clock::now();
+
+  std::vector<DINOObject> output = dino->detect(frame, prompt);
+
+  cv::Mat y_plane(yuvFrame->height, yuvFrame->width, CV_8UC1, yuvFrame->data[0],
+                  yuvFrame->linesize[0]);
+
+  for (const auto &det : output) {
+    cv::Rect bbox = det.box & cv::Rect(0, 0, frame.cols, frame.rows);
+    if (bbox.area() > 0) {
+      // Draw a black bounding box around the detected text prompt objects onto
+      // the Y-plane
+      cv::rectangle(y_plane, bbox, cv::Scalar(0), 4);
     }
   }
 
