@@ -286,19 +286,28 @@ VideoProcessor::VideoProcessor(const std::map<std::string, std::string> &args)
         std::max(1u, std::thread::hardware_concurrency() / 10);
     int intraOpThreads =
         std::max(1u, std::thread::hardware_concurrency() / numInferenceThreads);
-    int tensorSize = 800;       // Expected mapping dimensions for the 'tiny'
-                                // architecture ONNX graph.
     int optimalDinoThreads = 5; // Theoretical max bound per worker instance
 
     Metrics::getInstance().setThreadInfo(numInferenceThreads,
                                          std::thread::hardware_concurrency());
+
+    // Instantiate the primary thread worker then copy its properties natively
+    auto primary_dino = std::make_unique<GroundingDINO>(
+        modelPath, 0.3f, "vocab.txt", 0.25f, intraOpThreads);
+
+    std::string backend, precision;
+    int t_width, t_height, optimal;
+    primary_dino->get_model_info(backend, precision, t_width, t_height,
+                                 optimal);
+
     Metrics::getInstance().setOptimizationInfo(
-        "ONNXRuntime CPU", "FP32", tensorSize, tensorSize, intraOpThreads,
-        optimalDinoThreads);
-    for (int i = 0; i < numInferenceThreads; ++i) {
-      auto dino_instance = std::make_unique<GroundingDINO>(
-          modelPath, 0.3f, "vocab.txt", 0.25f, intraOpThreads, tensorSize);
-      dinoPool.push_back(std::move(dino_instance));
+        backend, precision, t_width, t_height, intraOpThreads, optimal);
+
+    dinoPool.push_back(std::move(primary_dino));
+
+    for (int i = 1; i < numInferenceThreads; ++i) {
+      dinoPool.push_back(std::make_unique<GroundingDINO>(
+          modelPath, 0.3f, "vocab.txt", 0.25f, intraOpThreads));
     }
   }
 }

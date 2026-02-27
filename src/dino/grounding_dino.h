@@ -20,8 +20,10 @@ class GroundingDINO {
 public:
   GroundingDINO(std::string modelpath, float box_threshold,
                 std::string vocab_path, float text_threshold,
-                int num_threads = 1, int img_size = 800);
+                int num_threads = 1);
   std::vector<DINOObject> detect(cv::Mat srcimg, std::string text_prompt);
+  void get_model_info(std::string &backend, std::string &precision, int &width,
+                      int &height, int &optimal);
 
 private:
   void preprocess(cv::Mat img);
@@ -55,6 +57,9 @@ private:
 
   float box_threshold;
   float text_threshold;
+  int optimal_threads = 5;
+  std::string active_backend = "ONNXRuntime CPU";
+  std::string active_precision = "FP32";
   const int max_text_len = 256;
   std::vector<int64_t> specical_tokens = {101, 102, 1012, 1029};
 };
