@@ -247,3 +247,21 @@ Average Time to Frame (T2F): 9.754 ms
 Average Time to Conversion (TTC): 2.5109 ms
 Average Time to Inference (TTI): 27442.9 ms
 ================================
+
+
+=== Video Processing Metrics ===
+Hardware Concurrency: 20 Cores
+Inference Workers: 2 Threads
+IntraOp Threads/Worker: 10
+Optimal Threads/Worker: 5
+Inference Backend: ONNXRuntime CPU (FP32)
+Frame Size: 960x540
+Tensor Resolution: 800x800
+Total Time: 569683 ms
+Frames Decoded: 189
+Frames Inferred: 189
+Frames Encoded: 189
+Average FPS: 0.331763
+Average Time to Frame (T2F): 5.81481 ms
+Average Time to Conversion (TTC): 4.09431 ms
+Average Time to Inference (TTI): 6010.53 ms

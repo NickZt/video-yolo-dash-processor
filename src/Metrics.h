@@ -47,13 +47,15 @@ public:
 
   void setOptimizationInfo(const std::string &backend,
                            const std::string &precision, int t_width,
-                           int t_height, int intra_threads) {
+                           int t_height, int intra_threads,
+                           int optimal_threads) {
     std::lock_guard<std::mutex> lock(mtx);
     inference_backend = backend;
     model_precision = precision;
     tensor_width.store(t_width);
     tensor_height.store(t_height);
     intra_op_threads.store(intra_threads);
+    optimal_intra_threads.store(optimal_threads);
   }
 
   void printMetrics() {
@@ -79,6 +81,8 @@ public:
               << " Cores\n";
     std::cout << "Inference Workers: " << num_workers.load() << " Threads\n";
     std::cout << "IntraOp Threads/Worker: " << intra_op_threads.load() << "\n";
+    std::cout << "Optimal Threads/Worker: " << optimal_intra_threads.load()
+              << "\n";
     std::cout << "Inference Backend: " << inference_backend << " ("
               << model_precision << ")\n";
     std::cout << "Frame Size: " << frame_width.load() << "x"
@@ -123,4 +127,5 @@ private:
   std::atomic<int> tensor_width{0};
   std::atomic<int> tensor_height{0};
   std::atomic<int> intra_op_threads{0};
+  std::atomic<int> optimal_intra_threads{0};
 };

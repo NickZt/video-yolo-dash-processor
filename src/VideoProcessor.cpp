@@ -254,16 +254,15 @@ VideoProcessor::VideoProcessor(const std::map<std::string, std::string> &args)
   engineType = args.at("--engine");
   std::string modelPath = args.at("--model");
 
-  numInferenceThreads = std::max(
-      1u, std::thread::hardware_concurrency() /
-              2); // Right now this for stability. In test it will be set to 10
-                  // or 20 for Intel 13g have doubts about its energy eff cores
-  Metrics::getInstance().setThreadInfo(numInferenceThreads,
-                                       std::thread::hardware_concurrency());
-
   if (engineType == "yolo") {
+    numInferenceThreads = std::max(1u, std::thread::hardware_concurrency() /
+                                           2); // default scaling
+    int optimalYoloThreads =
+        1; // YOLO optimally runs 1 IntraOp thread under scaling
+    Metrics::getInstance().setThreadInfo(numInferenceThreads,
+                                         std::thread::hardware_concurrency());
     Metrics::getInstance().setOptimizationInfo("ONNXRuntime CPU", "FP32", 640,
-                                               640, 1);
+                                               640, 1, optimalYoloThreads);
     for (int i = 0; i < numInferenceThreads; ++i) {
       std::unique_ptr<YOLO> base_yolo = CreateFactory::instance().create(
           Backend_Type::ONNXRuntime, Task_Type::Segment);
@@ -280,13 +279,25 @@ VideoProcessor::VideoProcessor(const std::map<std::string, std::string> &args)
       yoloPool.push_back(std::move(yolo_instance));
     }
   } else if (engineType == "dino") {
-    // Currently GroundingDINO relies on 800x800 tensor with FP32 precision and
-    // 1 intra op thread.
-    Metrics::getInstance().setOptimizationInfo("ONNXRuntime CPU", "FP32", 800,
-                                               800, 1);
+    // GroundingDINO relies on heavy self-attention mechanisms mapping
+    // significantly better onto fewer individual concurrent queue dispatchers
+    // paired with higher integrated thread limits.
+    numInferenceThreads =
+        std::max(1u, std::thread::hardware_concurrency() / 10);
+    int intraOpThreads =
+        std::max(1u, std::thread::hardware_concurrency() / numInferenceThreads);
+    int tensorSize = 800;       // Expected mapping dimensions for the 'tiny'
+                                // architecture ONNX graph.
+    int optimalDinoThreads = 5; // Theoretical max bound per worker instance
+
+    Metrics::getInstance().setThreadInfo(numInferenceThreads,
+                                         std::thread::hardware_concurrency());
+    Metrics::getInstance().setOptimizationInfo(
+        "ONNXRuntime CPU", "FP32", tensorSize, tensorSize, intraOpThreads,
+        optimalDinoThreads);
     for (int i = 0; i < numInferenceThreads; ++i) {
-      auto dino_instance =
-          std::make_unique<GroundingDINO>(modelPath, 0.3f, "vocab.txt", 0.25f);
+      auto dino_instance = std::make_unique<GroundingDINO>(
+          modelPath, 0.3f, "vocab.txt", 0.25f, intraOpThreads, tensorSize);
       dinoPool.push_back(std::move(dino_instance));
     }
   }

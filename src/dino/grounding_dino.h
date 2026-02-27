@@ -19,7 +19,8 @@ struct DINOObject {
 class GroundingDINO {
 public:
   GroundingDINO(std::string modelpath, float box_threshold,
-                std::string vocab_path, float text_threshold);
+                std::string vocab_path, float text_threshold,
+                int num_threads = 1, int img_size = 800);
   std::vector<DINOObject> detect(cv::Mat srcimg, std::string text_prompt);
 
 private:
@@ -31,7 +32,7 @@ private:
 
   const float mean[3] = {0.485, 0.456, 0.406};
   const float std[3] = {0.229, 0.224, 0.225};
-  const int size[2] = {800, 800}; // (Width, Height)
+  int size[2]; // (Width, Height)
 
   std::shared_ptr<TokenizerBase> tokenizer;
 
