@@ -35,6 +35,8 @@ int main(int argc, char *argv[]) {
               << "  --prompt <\"text prompt\"> (required if engine is dino)\n"
               << "  --checkframes <count> (optional bounding limit for "
                  "testing/benchmarking)\n"
+              << "  --optimize <1|0> (optional aggressive graph layout "
+                 "optimization)\n"
               << std::endl;
     return 1;
   }

@@ -20,7 +20,7 @@ class GroundingDINO {
 public:
   GroundingDINO(std::string modelpath, float box_threshold,
                 std::string vocab_path, float text_threshold,
-                int num_threads = 1);
+                int num_threads = 1, bool use_optimization = false);
   std::vector<DINOObject> detect(cv::Mat srcimg, std::string text_prompt);
   void get_model_info(std::string &backend, std::string &precision, int &width,
                       int &height, int &optimal);

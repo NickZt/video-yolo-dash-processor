@@ -10,11 +10,18 @@ using namespace Ort;
 
 GroundingDINO::GroundingDINO(string modelpath, float box_threshold,
                              string vocab_path, float text_threshold,
-                             int num_threads)
+                             int num_threads, bool use_optimization)
     : env(ORT_LOGGING_LEVEL_ERROR, "GroundingDINO") {
   sessionOptions.SetIntraOpNumThreads(num_threads);
   sessionOptions.SetInterOpNumThreads(1);
-  sessionOptions.SetGraphOptimizationLevel(ORT_ENABLE_BASIC);
+
+  if (use_optimization) {
+    sessionOptions.EnableCpuMemArena();
+    sessionOptions.EnableMemPattern();
+    sessionOptions.SetGraphOptimizationLevel(ORT_ENABLE_ALL);
+  } else {
+    sessionOptions.SetGraphOptimizationLevel(ORT_ENABLE_BASIC);
+  }
 
   ort_session =
       std::make_unique<Ort::Session>(env, modelpath.c_str(), sessionOptions);

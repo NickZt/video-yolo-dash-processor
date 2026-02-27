@@ -258,6 +258,11 @@ VideoProcessor::VideoProcessor(const std::map<std::string, std::string> &args)
   engineType = args.at("--engine");
   std::string modelPath = args.at("--model");
 
+  bool use_optimization = false;
+  if (args.find("--optimize") != args.end()) {
+    use_optimization = std::stoi(args.at("--optimize")) == 1;
+  }
+
   if (engineType == "yolo") {
     numInferenceThreads = std::max(1u, std::thread::hardware_concurrency() /
                                            2); // default scaling
@@ -297,7 +302,7 @@ VideoProcessor::VideoProcessor(const std::map<std::string, std::string> &args)
 
     // Instantiate the primary thread worker then copy its properties natively
     auto primary_dino = std::make_unique<GroundingDINO>(
-        modelPath, 0.3f, "vocab.txt", 0.25f, intraOpThreads);
+        modelPath, 0.3f, "vocab.txt", 0.25f, intraOpThreads, use_optimization);
 
     std::string backend, precision;
     int t_width, t_height, optimal;
@@ -310,8 +315,9 @@ VideoProcessor::VideoProcessor(const std::map<std::string, std::string> &args)
     dinoPool.push_back(std::move(primary_dino));
 
     for (int i = 1; i < numInferenceThreads; ++i) {
-      dinoPool.push_back(std::make_unique<GroundingDINO>(
-          modelPath, 0.3f, "vocab.txt", 0.25f, intraOpThreads));
+      dinoPool.push_back(
+          std::make_unique<GroundingDINO>(modelPath, 0.3f, "vocab.txt", 0.25f,
+                                          intraOpThreads, use_optimization));
     }
   }
 }
