@@ -286,3 +286,46 @@ Average Time to Inference (TTI): 4760.82 ms
 python3 export_gdino_1_5.py
 
 Applying INT8 Dynamic Quantization to the Baseline Grounding DINO ONNX Graph
+
+Baseline (FP32 Model): ~5734.08ms Average TTI
+Quantized (INT8 Model): ~4628.88ms Average TTI
+
+vanilla FP32 Model
+./build/video_processor --engine dino --media ../segment1.m4s --init ../init.dash --out test_dino_output/ --model test_assets/groundingdino.onnx --prompt "person . bag ." --checkframes 10
+=== Video Processing Metrics ===
+Hardware Concurrency: 20 Cores
+Inference Workers: 2 Threads
+IntraOp Threads/Worker: 10
+Optimal Threads/Worker: 5
+Inference Backend: ONNXRuntime CPU (FP32)
+Frame Size: 960x540
+Tensor Resolution: 800x800
+Total Time: 29310 ms
+Frames Decoded: 11
+Frames Inferred: 10
+Frames Encoded: 10
+Average FPS: 0.34118
+Average Time to Frame (T2F): 2.14114 ms
+Average Time to Conversion (TTC): 0.64416 ms
+Average Time to Inference (TTI): 5734.08 ms
+================================
+
+Quantized (INT8 Model)
+cmake --build build -j$(nproc) && ./build/video_processor --engine dino --media ../segment1.m4s --init ../init.dash --out test_dino_output/ --model test_assets/groundingdino_int8.onnx --prompt "person . bag ." --checkframes 10
+=== Video Processing Metrics ===
+Hardware Concurrency: 20 Cores
+Inference Workers: 2 Threads
+IntraOp Threads/Worker: 10
+Optimal Threads/Worker: 5
+Inference Backend: ONNXRuntime CPU (FP32)
+Frame Size: 960x540
+Tensor Resolution: 800x800
+Total Time: 23245 ms
+Frames Decoded: 11
+Frames Inferred: 10
+Frames Encoded: 10
+Average FPS: 0.4302
+Average Time to Frame (T2F): 2.34479 ms
+Average Time to Conversion (TTC): 0.647118 ms
+Average Time to Inference (TTI): 4628.88 ms
+================================
