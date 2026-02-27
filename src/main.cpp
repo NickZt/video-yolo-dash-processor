@@ -33,6 +33,8 @@ int main(int argc, char *argv[]) {
               << "  --out <output_dir>\n"
               << "  --model <path_to_onnx_model>\n"
               << "  --prompt <\"text prompt\"> (required if engine is dino)\n"
+              << "  --checkframes <count> (optional bounding limit for "
+                 "testing/benchmarking)\n"
               << std::endl;
     return 1;
   }

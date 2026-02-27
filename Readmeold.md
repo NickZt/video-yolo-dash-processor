@@ -283,3 +283,6 @@ Average Time to Frame (T2F): 2.81651 ms
 Average Time to Conversion (TTC): 2.2257 ms
 Average Time to Inference (TTI): 4760.82 ms
 
+python3 export_gdino_1_5.py
+
+Applying INT8 Dynamic Quantization to the Baseline Grounding DINO ONNX Graph

@@ -20,6 +20,8 @@ public:
   void incrementFramesInferred() { frames_inferred++; }
   void incrementFramesEncoded() { frames_encoded++; }
 
+  int getFramesEncoded() const { return frames_encoded.load(); }
+
   void addTimeToFrame(double ms) {
     std::lock_guard<std::mutex> lock(mtx);
     total_time_to_frame += ms;
@@ -62,19 +64,15 @@ public:
     auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(
                         end_time - start_time)
                         .count();
-    double fps = frames_encoded.load() > 0 && duration > 0
-                     ? (frames_encoded.load() * 1000.0) / duration
-                     : 0.0;
+    auto duration_ms = std::max<long long>(1, duration);
+    double fps = (frames_encoded.load() * 1000.0) / duration_ms;
 
-    double avg_t2f = frames_decoded.load() > 0
-                         ? total_time_to_frame / frames_decoded.load()
-                         : 0.0;
-    double avg_ttc = frames_decoded.load() > 0
-                         ? total_time_to_conversion / frames_decoded.load()
-                         : 0.0;
-    double avg_tti = frames_inferred.load() > 0
-                         ? total_time_to_inference / frames_inferred.load()
-                         : 0.0;
+    double avg_t2f =
+        total_time_to_frame / std::max<int>(1, frames_decoded.load());
+    double avg_ttc =
+        total_time_to_conversion / std::max<int>(1, frames_decoded.load());
+    double avg_tti =
+        total_time_to_inference / std::max<int>(1, frames_inferred.load());
 
     std::cout << "\n=== Video Processing Metrics ===\n";
     std::cout << "Hardware Concurrency: " << hw_concurrency.load()

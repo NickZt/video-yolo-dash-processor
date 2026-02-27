@@ -224,7 +224,11 @@ public:
     if (avcodec_send_frame(codecCtx, nullptr) == 0) {
       receiveAndWritePackets();
     }
-    av_write_trailer(fmtCtx);
+    // Only write trailer if we actually encoded frames to avoid DASH manifest
+    // divide-by-zero FPE
+    if (Metrics::getInstance().getFramesEncoded() > 0) {
+      av_write_trailer(fmtCtx);
+    }
   }
 
 private:
@@ -359,7 +363,17 @@ bool VideoProcessor::processConfig(const std::string &initSegmentPath,
     cv::Mat frame;
     AVFrame *yuvFrame = nullptr;
     int64_t pts;
+
+    int checkFramesLimit = -1;
+    if (args.find("--checkframes") != args.end()) {
+      checkFramesLimit = std::stoi(args.at("--checkframes"));
+    }
+
+    int frames_read = 0;
     while (decoder.readFrame(frame, yuvFrame, pts)) {
+      if (checkFramesLimit > 0 && frames_read >= checkFramesLimit)
+        break; // Dynamically bound benchmarking threshold
+      frames_read++;
       FramePayload payload;
       payload.frameBGR = frame;
       payload.yuvFrame = yuvFrame;
@@ -378,7 +392,7 @@ bool VideoProcessor::processConfig(const std::string &initSegmentPath,
       while (true) {
         auto payloadOpt = decodeQueue.pop();
         if (!payloadOpt) {
-          if (isDecodingFinished)
+          if (decodeQueue.is_closed() && decodeQueue.size() == 0)
             break;
           continue;
         }
@@ -406,7 +420,7 @@ bool VideoProcessor::processConfig(const std::string &initSegmentPath,
   while (true) {
     auto payloadOpt = inferenceQueue.pop();
     if (!payloadOpt) {
-      if (activeInferenceThreads == 0 && inferenceQueue.size() == 0) {
+      if (inferenceQueue.is_closed() && inferenceQueue.size() == 0) {
         break;
       }
       continue;
