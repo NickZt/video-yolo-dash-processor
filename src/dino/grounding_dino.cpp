@@ -31,7 +31,16 @@ GroundingDINO::GroundingDINO(string modelpath, float box_threshold,
 
   // Retrieve active precision natively from the ONNX graph
   ONNXTensorElementDataType type = tensor_info.GetElementType();
-  if (type == ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT16) {
+
+  // Check filename for precision overrides since onnx input nodes usually
+  // remain FP32 )
+  if (modelpath.find("int8") != std::string::npos ||
+      modelpath.find("INT8") != std::string::npos) {
+    this->active_precision = "INT8";
+  } else if (modelpath.find("fp16") != std::string::npos ||
+             modelpath.find("FP16") != std::string::npos) {
+    this->active_precision = "FP16";
+  } else if (type == ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT16) {
     this->active_precision = "FP16";
   } else if (type == ONNX_TENSOR_ELEMENT_DATA_TYPE_INT8 ||
              type == ONNX_TENSOR_ELEMENT_DATA_TYPE_UINT8) {
