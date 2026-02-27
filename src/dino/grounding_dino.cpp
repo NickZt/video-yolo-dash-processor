@@ -120,7 +120,7 @@ vector<DINOObject> GroundingDINO::detect(Mat srcimg, string text_prompt) {
   std::vector<int64_t> input_img_shape = {1, 3, this->size[1], this->size[0]};
   std::vector<int64_t> input_ids_shape = {1, seq_len};
   std::vector<int64_t> pixel_mask_shape = {1, this->size[1], this->size[0]};
-  std::vector<uint8_t> pixel_mask(this->size[1] * this->size[0], 1);
+  std::vector<int64_t> pixel_mask(this->size[1] * this->size[0], 1);
 
   std::vector<Ort::Value> inputTensors;
   inputTensors.push_back((Ort::Value::CreateTensor<float>(
@@ -132,13 +132,12 @@ vector<DINOObject> GroundingDINO::detect(Mat srcimg, string text_prompt) {
   inputTensors.push_back((Ort::Value::CreateTensor<int64_t>(
       memory_info_handler, token_type_ids[0].data(), token_type_ids[0].size(),
       input_ids_shape.data(), input_ids_shape.size())));
-  inputTensors.push_back(Ort::Value::CreateTensor<bool>(
-      memory_info_handler, reinterpret_cast<bool *>(attention_mask[0].data()),
-      attention_mask[0].size(), input_ids_shape.data(),
-      input_ids_shape.size()));
-  inputTensors.push_back(Ort::Value::CreateTensor<bool>(
-      memory_info_handler, reinterpret_cast<bool *>(pixel_mask.data()),
-      pixel_mask.size(), pixel_mask_shape.data(), pixel_mask_shape.size()));
+  inputTensors.push_back(Ort::Value::CreateTensor<int64_t>(
+      memory_info_handler, attention_mask[0].data(), attention_mask[0].size(),
+      input_ids_shape.data(), input_ids_shape.size()));
+  inputTensors.push_back(Ort::Value::CreateTensor<int64_t>(
+      memory_info_handler, pixel_mask.data(), pixel_mask.size(),
+      pixel_mask_shape.data(), pixel_mask_shape.size()));
 
   std::vector<Ort::Value> ort_outputs = ort_session->Run(
       Ort::RunOptions{nullptr}, input_names, inputTensors.data(),

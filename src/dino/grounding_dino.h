@@ -31,13 +31,13 @@ private:
 
   const float mean[3] = {0.485, 0.456, 0.406};
   const float std[3] = {0.229, 0.224, 0.225};
-  const int size[2] = {1200, 800}; // (Width, Height)
+  const int size[2] = {800, 800}; // (Width, Height)
 
   std::shared_ptr<TokenizerBase> tokenizer;
 
   std::vector<float> input_img;
   std::vector<std::vector<int64_t>> input_ids;
-  std::vector<std::vector<uint8_t>> attention_mask;
+  std::vector<std::vector<int64_t>> attention_mask;
   std::vector<std::vector<int64_t>> token_type_ids;
   std::vector<std::vector<uint8_t>> text_self_attention_masks;
   std::vector<std::vector<int64_t>> position_ids;

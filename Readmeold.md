@@ -201,3 +201,25 @@ find test_assets -name "*.onnx"
 
 
 mv test_assets/onnx/model.onnx test_assets/groundingdino.onnx && rm -rf test_assets/onnx && ./build/video_processor --engine dino --media test_assets/dash_720p/chunk-1.m4s --init test_assets/dash_720p/init.dash --out test_dino_output/ --model test_assets/groundingdino.onnx --prompt "white square ."
+
+
+./build/video_processor --engine dino --media ../segment1.m4s --init ../init.dash --out test_dino_output/ --model test_assets/groundingdino.onnx --prompt "person . tag ."
+
+./build/video_processor --engine dino --media ../segment1.m4s --init ../init.dash --out test_dino_output/ --model test_assets/groundingdino.onnx --prompt "person . tag ."
+
+video_processor$ cmake --build build -j$(nproc) && ./build/video_processor --engine dino --media ../segment1.m4s --init ../init.dash --out test_dino_output/ --model test_assets/groundingdino.onnx --prompt "person . bag ."
+
+
+=== Video Processing Metrics ===
+Hardware Concurrency: 20 Cores
+Inference Workers: 10 Threads
+Frame Size: 960x540
+Total Time: 614572 ms
+Frames Decoded: 189
+Frames Inferred: 189
+Frames Encoded: 189
+Average FPS: 0.307531
+Average Time to Frame (T2F): 4.03664 ms
+Average Time to Conversion (TTC): 5.5615 ms
+Average Time to Inference (TTI): 32095.4 ms
+================================
