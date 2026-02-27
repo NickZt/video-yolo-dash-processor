@@ -45,6 +45,17 @@ public:
     hw_concurrency.store(concurrency);
   }
 
+  void setOptimizationInfo(const std::string &backend,
+                           const std::string &precision, int t_width,
+                           int t_height, int intra_threads) {
+    std::lock_guard<std::mutex> lock(mtx);
+    inference_backend = backend;
+    model_precision = precision;
+    tensor_width.store(t_width);
+    tensor_height.store(t_height);
+    intra_op_threads.store(intra_threads);
+  }
+
   void printMetrics() {
     auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(
                         end_time - start_time)
@@ -67,8 +78,13 @@ public:
     std::cout << "Hardware Concurrency: " << hw_concurrency.load()
               << " Cores\n";
     std::cout << "Inference Workers: " << num_workers.load() << " Threads\n";
+    std::cout << "IntraOp Threads/Worker: " << intra_op_threads.load() << "\n";
+    std::cout << "Inference Backend: " << inference_backend << " ("
+              << model_precision << ")\n";
     std::cout << "Frame Size: " << frame_width.load() << "x"
               << frame_height.load() << "\n";
+    std::cout << "Tensor Resolution: " << tensor_width.load() << "x"
+              << tensor_height.load() << "\n";
     std::cout << "Total Time: " << duration << " ms\n";
     std::cout << "Frames Decoded: " << frames_decoded.load() << "\n";
     std::cout << "Frames Inferred: " << frames_inferred.load() << "\n";
@@ -101,4 +117,10 @@ private:
   std::chrono::steady_clock::time_point start_time;
   std::chrono::steady_clock::time_point end_time;
   std::mutex mtx;
+
+  std::string inference_backend{"CPU"};
+  std::string model_precision{"FP32"};
+  std::atomic<int> tensor_width{0};
+  std::atomic<int> tensor_height{0};
+  std::atomic<int> intra_op_threads{0};
 };

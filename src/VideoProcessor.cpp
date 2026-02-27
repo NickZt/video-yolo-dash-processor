@@ -262,6 +262,8 @@ VideoProcessor::VideoProcessor(const std::map<std::string, std::string> &args)
                                        std::thread::hardware_concurrency());
 
   if (engineType == "yolo") {
+    Metrics::getInstance().setOptimizationInfo("ONNXRuntime CPU", "FP32", 640,
+                                               640, 1);
     for (int i = 0; i < numInferenceThreads; ++i) {
       std::unique_ptr<YOLO> base_yolo = CreateFactory::instance().create(
           Backend_Type::ONNXRuntime, Task_Type::Segment);
@@ -278,6 +280,10 @@ VideoProcessor::VideoProcessor(const std::map<std::string, std::string> &args)
       yoloPool.push_back(std::move(yolo_instance));
     }
   } else if (engineType == "dino") {
+    // Currently GroundingDINO relies on 800x800 tensor with FP32 precision and
+    // 1 intra op thread.
+    Metrics::getInstance().setOptimizationInfo("ONNXRuntime CPU", "FP32", 800,
+                                               800, 1);
     for (int i = 0; i < numInferenceThreads; ++i) {
       auto dino_instance =
           std::make_unique<GroundingDINO>(modelPath, 0.3f, "vocab.txt", 0.25f);

@@ -200,6 +200,9 @@ cd ../dash_720p && ffmpeg -re -i ../test_720p.mp4 -c:v copy -f dash -window_size
 find test_assets -name "*.onnx"
 
 
+# Run Dino Run
+
+
 mv test_assets/onnx/model.onnx test_assets/groundingdino.onnx && rm -rf test_assets/onnx && ./build/video_processor --engine dino --media test_assets/dash_720p/chunk-1.m4s --init test_assets/dash_720p/init.dash --out test_dino_output/ --model test_assets/groundingdino.onnx --prompt "white square ."
 
 
@@ -222,4 +225,25 @@ Average FPS: 0.307531
 Average Time to Frame (T2F): 4.03664 ms
 Average Time to Conversion (TTC): 5.5615 ms
 Average Time to Inference (TTI): 32095.4 ms
+================================
+
+# Run Dino Run 
+
+New metrics data
+
+=== Video Processing Metrics ===
+Hardware Concurrency: 20 Cores
+Inference Workers: 10 Threads
+IntraOp Threads/Worker: 1
+Inference Backend: ONNXRuntime CPU (FP32)
+Frame Size: 960x540
+Tensor Resolution: 800x800
+Total Time: 526339 ms
+Frames Decoded: 189
+Frames Inferred: 189
+Frames Encoded: 189
+Average FPS: 0.359084
+Average Time to Frame (T2F): 9.754 ms
+Average Time to Conversion (TTC): 2.5109 ms
+Average Time to Inference (TTI): 27442.9 ms
 ================================
