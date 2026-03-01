@@ -68,6 +68,7 @@ pkg_check_modules(EIGEN3 REQUIRED eigen3)
 include_directories(
     src/yolo
     src/yolo/onnxruntime
+    src/dino
     ${AVCODEC_INCLUDE_DIRS}
     ${AVFORMAT_INCLUDE_DIRS}
     ${AVUTIL_INCLUDE_DIRS}
@@ -79,10 +80,14 @@ include_directories(
 # Source files
 file(GLOB YOLO_SRCS "src/yolo/*.cpp" "src/yolo/onnxruntime/*.cpp")
 list(REMOVE_ITEM YOLO_SRCS "${CMAKE_CURRENT_SOURCE_DIR}/src/yolo/main.cpp")
+
+file(GLOB DINO_SRCS "src/dino/*.cpp")
+
 set(SRCS
     src/main.cpp
     src/VideoProcessor.cpp
     ${YOLO_SRCS}
+    ${DINO_SRCS}
 )
 
 add_executable(video_processor ${SRCS})

@@ -177,3 +177,155 @@ Average Time to Frame (T2F): 3.08831 ms
 Average Time to Conversion (TTC): 1.702 ms
 Average Time to Inference (TTI): 329.949 ms
 ````
+
+Grounding DINO
+
+
+python3 -c "from huggingface_hub import hf_hub_download; hf_hub_download(repo_id='onnx-community/grounding-dino-tiny-ONNX', filename='onnx/model.onnx', local_dir='test_assets')"
+
+mv test_assets/onnx/model.onnx test_assets/groundingdino.onnx && rm -rf test_assets/onnx && ./build/video_processor --engine dino --media test_assets/dash_720p/chunk-1.m4s --init test_assets/dash_720p/init.dash --out test_dino_output/ --model test_assets/groundingdino.onnx --prompt "white square ."
+
+# Extract DASH chunks to simulate the live video stream ingest
+cd test_assets/dash_4k && ffmpeg -re -i ../test_4k.mp4 -c:v copy -f dash -window_size 5 -extra_window_size 5 -seg_duration 2 -init_seg_name init.dash -media_seg_name chunk-\$Number\$.m4s manifest.mpd
+cd ../dash_1080p && ffmpeg -re -i ../test_1080p.mp4 -c:v copy -f dash -window_size 5 -extra_window_size 5 -seg_duration 2 -init_seg_name init.dash -media_seg_name chunk-\$Number\$.m4s manifest.mpd
+cd ../dash_720p && ffmpeg -re -i ../test_720p.mp4 -c:v copy -f dash -window_size 5 -extra_window_size 5 -seg_duration 2 -init_seg_name init.dash -media_seg_name chunk-\$Number\$.m4s manifest.mpd
+
+ffmpeg -y -f lavfi -i testsrc=size=3840x2160:rate=30 -vcodec libx264 -preset ultrafast -t 10 -pix_fmt yuv420p test_assets/test_4k.mp4 && ffmpeg -y -f lavfi -i testsrc=size=1920x1080:rate=30 -vcodec libx264 -preset ultrafast -t 10 -pix_fmt yuv420p test_assets/test_1080p.mp4 && ffmpeg -y -f lavfi -i testsrc=size=1280x720:rate=30 -vcodec libx264 -preset ultrafast -t 10 -pix_fmt yuv420p test_assets/test_720p.mp4
+
+# Extract DASH chunks to simulate the live video stream ingest
+cd test_assets/dash_4k && ffmpeg -re -i ../test_4k.mp4 -c:v copy -f dash -window_size 5 -extra_window_size 5 -seg_duration 2 -init_seg_name init.dash -media_seg_name chunk-\$Number\$.m4s manifest.mpd
+cd ../dash_1080p && ffmpeg -re -i ../test_1080p.mp4 -c:v copy -f dash -window_size 5 -extra_window_size 5 -seg_duration 2 -init_seg_name init.dash -media_seg_name chunk-\$Number\$.m4s manifest.mpd
+cd ../dash_720p && ffmpeg -re -i ../test_720p.mp4 -c:v copy -f dash -window_size 5 -extra_window_size 5 -seg_duration 2 -init_seg_name init.dash -media_seg_name chunk-\$Number\$.m4s manifest.mpd
+
+find test_assets -name "*.onnx"
+
+
+# Run Dino Run
+
+
+mv test_assets/onnx/model.onnx test_assets/groundingdino.onnx && rm -rf test_assets/onnx && ./build/video_processor --engine dino --media test_assets/dash_720p/chunk-1.m4s --init test_assets/dash_720p/init.dash --out test_dino_output/ --model test_assets/groundingdino.onnx --prompt "white square ."
+
+
+./build/video_processor --engine dino --media ../segment1.m4s --init ../init.dash --out test_dino_output/ --model test_assets/groundingdino.onnx --prompt "person . tag ."
+
+./build/video_processor --engine dino --media ../segment1.m4s --init ../init.dash --out test_dino_output/ --model test_assets/groundingdino.onnx --prompt "person . tag ."
+
+video_processor$ cmake --build build -j$(nproc) && ./build/video_processor --engine dino --media ../segment1.m4s --init ../init.dash --out test_dino_output/ --model test_assets/groundingdino.onnx --prompt "person . bag ."
+
+
+=== Video Processing Metrics ===
+Hardware Concurrency: 20 Cores
+Inference Workers: 10 Threads
+Frame Size: 960x540
+Total Time: 614572 ms
+Frames Decoded: 189
+Frames Inferred: 189
+Frames Encoded: 189
+Average FPS: 0.307531
+Average Time to Frame (T2F): 4.03664 ms
+Average Time to Conversion (TTC): 5.5615 ms
+Average Time to Inference (TTI): 32095.4 ms
+================================
+
+# Run Dino Run 
+
+New metrics data
+
+=== Video Processing Metrics ===
+Hardware Concurrency: 20 Cores
+Inference Workers: 10 Threads
+IntraOp Threads/Worker: 1
+Inference Backend: ONNXRuntime CPU (FP32)
+Frame Size: 960x540
+Tensor Resolution: 800x800
+Total Time: 526339 ms
+Frames Decoded: 189
+Frames Inferred: 189
+Frames Encoded: 189
+Average FPS: 0.359084
+Average Time to Frame (T2F): 9.754 ms
+Average Time to Conversion (TTC): 2.5109 ms
+Average Time to Inference (TTI): 27442.9 ms
+================================
+
+
+=== Video Processing Metrics ===
+Hardware Concurrency: 20 Cores
+Inference Workers: 2 Threads
+IntraOp Threads/Worker: 10
+Optimal Threads/Worker: 5
+Inference Backend: ONNXRuntime CPU (FP32)
+Frame Size: 960x540
+Tensor Resolution: 800x800
+Total Time: 569683 ms
+Frames Decoded: 189
+Frames Inferred: 189
+Frames Encoded: 189
+Average FPS: 0.331763
+Average Time to Frame (T2F): 5.81481 ms
+Average Time to Conversion (TTC): 4.09431 ms
+Average Time to Inference (TTI): 6010.53 ms
+
+=== Video Processing Metrics ===
+Hardware Concurrency: 20 Cores
+Inference Workers: 2 Threads
+IntraOp Threads/Worker: 10
+Optimal Threads/Worker: 5
+Inference Backend: ONNXRuntime CPU (FP32)
+Frame Size: 960x540
+Tensor Resolution: 800x800
+Total Time: 451489 ms
+Frames Decoded: 189
+Frames Inferred: 189
+Frames Encoded: 189
+Average FPS: 0.418615
+Average Time to Frame (T2F): 2.81651 ms
+Average Time to Conversion (TTC): 2.2257 ms
+Average Time to Inference (TTI): 4760.82 ms
+
+python3 export_gdino_1_5.py
+
+Applying INT8 Dynamic Quantization to the Baseline Grounding DINO ONNX Graph
+
+Baseline (FP32 Model): ~5734.08ms Average TTI
+Quantized (INT8 Model): ~4628.88ms Average TTI
+
+vanilla FP32 Model
+./build/video_processor --engine dino --media ../segment1.m4s --init ../init.dash --out test_dino_output/ --model test_assets/groundingdino.onnx --prompt "person . bag ." --checkframes 10
+=== Video Processing Metrics ===
+Hardware Concurrency: 20 Cores
+Inference Workers: 2 Threads
+IntraOp Threads/Worker: 10
+Optimal Threads/Worker: 5
+Inference Backend: ONNXRuntime CPU (FP32)
+Frame Size: 960x540
+Tensor Resolution: 800x800
+Total Time: 29310 ms
+Frames Decoded: 11
+Frames Inferred: 10
+Frames Encoded: 10
+Average FPS: 0.34118
+Average Time to Frame (T2F): 2.14114 ms
+Average Time to Conversion (TTC): 0.64416 ms
+Average Time to Inference (TTI): 5734.08 ms
+================================
+
+Quantized (INT8 Model)
+cmake --build build -j$(nproc) && ./build/video_processor --engine dino --media ../segment1.m4s --init ../init.dash --out test_dino_output/ --model test_assets/groundingdino_int8.onnx --prompt "person . bag ." --checkframes 10
+=== Video Processing Metrics ===
+Hardware Concurrency: 20 Cores
+Inference Workers: 2 Threads
+IntraOp Threads/Worker: 10
+Optimal Threads/Worker: 5
+Inference Backend: ONNXRuntime CPU (FP32)
+Frame Size: 960x540
+Tensor Resolution: 800x800
+Total Time: 23245 ms
+Frames Decoded: 11
+Frames Inferred: 10
+Frames Encoded: 10
+Average FPS: 0.4302
+Average Time to Frame (T2F): 2.34479 ms
+Average Time to Conversion (TTC): 0.647118 ms
+Average Time to Inference (TTI): 4628.88 ms
+================================

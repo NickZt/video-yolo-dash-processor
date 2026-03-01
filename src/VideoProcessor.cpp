@@ -224,7 +224,11 @@ public:
     if (avcodec_send_frame(codecCtx, nullptr) == 0) {
       receiveAndWritePackets();
     }
-    av_write_trailer(fmtCtx);
+    // Only write trailer if we actually encoded frames to avoid DASH manifest
+    // divide-by-zero FPE
+    if (Metrics::getInstance().getFramesEncoded() > 0) {
+      av_write_trailer(fmtCtx);
+    }
   }
 
 private:
@@ -249,29 +253,72 @@ private:
 
 // --- Video Processor Class ---
 
-VideoProcessor::VideoProcessor(const std::string &modelPath)
-    : modelPath(modelPath) {
-  numInferenceThreads = std::max(
-      1u, std::thread::hardware_concurrency() /
-              2); // Right now this for stability. In test it will be set to 10
-                  // or 20 for Intel 13g have doubts about its energy eff cores
-  Metrics::getInstance().setThreadInfo(numInferenceThreads,
-                                       std::thread::hardware_concurrency());
+VideoProcessor::VideoProcessor(const std::map<std::string, std::string> &args)
+    : args(args) {
+  engineType = args.at("--engine");
+  std::string modelPath = args.at("--model");
 
-  for (int i = 0; i < numInferenceThreads; ++i) {
-    std::unique_ptr<YOLO> base_yolo = CreateFactory::instance().create(
-        Backend_Type::ONNXRuntime, Task_Type::Segment);
+  bool use_optimization = false;
+  if (args.find("--optimize") != args.end()) {
+    use_optimization = std::stoi(args.at("--optimize")) == 1;
+  }
 
-    if (!base_yolo) {
-      throw std::runtime_error("Failed to create YOLO model instance.");
+  if (engineType == "yolo") {
+    numInferenceThreads = std::max(1u, std::thread::hardware_concurrency() /
+                                           2); // default scaling
+    int optimalYoloThreads =
+        1; // YOLO optimally runs 1 IntraOp thread under scaling
+    Metrics::getInstance().setThreadInfo(numInferenceThreads,
+                                         std::thread::hardware_concurrency());
+    Metrics::getInstance().setOptimizationInfo("ONNXRuntime CPU", "FP32", 640,
+                                               640, 1, optimalYoloThreads);
+    for (int i = 0; i < numInferenceThreads; ++i) {
+      std::unique_ptr<YOLO> base_yolo = CreateFactory::instance().create(
+          Backend_Type::ONNXRuntime, Task_Type::Segment);
+
+      if (!base_yolo) {
+        throw std::runtime_error("Failed to create YOLO model instance.");
+      }
+
+      auto yolo_instance = std::unique_ptr<YOLO_Segment>(
+          dynamic_cast<YOLO_Segment *>(base_yolo.release()));
+
+      // Defaulting to CPU FP32 for now
+      yolo_instance->init(YOLOv8, CPU, FP32, modelPath);
+      yoloPool.push_back(std::move(yolo_instance));
     }
+  } else if (engineType == "dino") {
+    // GroundingDINO relies on heavy self-attention mechanisms mapping
+    // significantly better onto fewer individual concurrent queue dispatchers
+    // paired with higher integrated thread limits.
+    numInferenceThreads =
+        std::max(1u, std::thread::hardware_concurrency() / 10);
+    int intraOpThreads =
+        std::max(1u, std::thread::hardware_concurrency() / numInferenceThreads);
+    int optimalDinoThreads = 5; // Theoretical max bound per worker instance
 
-    auto yolo_instance = std::unique_ptr<YOLO_Segment>(
-        dynamic_cast<YOLO_Segment *>(base_yolo.release()));
+    Metrics::getInstance().setThreadInfo(numInferenceThreads,
+                                         std::thread::hardware_concurrency());
 
-    // Defaulting to CPU FP32 for now
-    yolo_instance->init(YOLOv8, CPU, FP32, modelPath);
-    yoloPool.push_back(std::move(yolo_instance));
+    // Instantiate the primary thread worker then copy its properties natively
+    auto primary_dino = std::make_unique<GroundingDINO>(
+        modelPath, 0.3f, "vocab.txt", 0.25f, intraOpThreads, use_optimization);
+
+    std::string backend, precision;
+    int t_width, t_height, optimal;
+    primary_dino->get_model_info(backend, precision, t_width, t_height,
+                                 optimal);
+
+    Metrics::getInstance().setOptimizationInfo(
+        backend, precision, t_width, t_height, intraOpThreads, optimal);
+
+    dinoPool.push_back(std::move(primary_dino));
+
+    for (int i = 1; i < numInferenceThreads; ++i) {
+      dinoPool.push_back(
+          std::make_unique<GroundingDINO>(modelPath, 0.3f, "vocab.txt", 0.25f,
+                                          intraOpThreads, use_optimization));
+    }
   }
 }
 
@@ -322,7 +369,17 @@ bool VideoProcessor::processConfig(const std::string &initSegmentPath,
     cv::Mat frame;
     AVFrame *yuvFrame = nullptr;
     int64_t pts;
+
+    int checkFramesLimit = -1;
+    if (args.find("--checkframes") != args.end()) {
+      checkFramesLimit = std::stoi(args.at("--checkframes"));
+    }
+
+    int frames_read = 0;
     while (decoder.readFrame(frame, yuvFrame, pts)) {
+      if (checkFramesLimit > 0 && frames_read >= checkFramesLimit)
+        break; // Dynamically bound benchmarking threshold
+      frames_read++;
       FramePayload payload;
       payload.frameBGR = frame;
       payload.yuvFrame = yuvFrame;
@@ -341,13 +398,18 @@ bool VideoProcessor::processConfig(const std::string &initSegmentPath,
       while (true) {
         auto payloadOpt = decodeQueue.pop();
         if (!payloadOpt) {
-          if (isDecodingFinished)
+          if (decodeQueue.is_closed() && decodeQueue.size() == 0)
             break;
           continue;
         }
         FramePayload payload = *payloadOpt;
         if (payload.isValid) {
-          processFrame(payload.frameBGR, payload.yuvFrame, yoloPool[i].get());
+          if (engineType == "yolo") {
+            processFrame(payload.frameBGR, payload.yuvFrame, yoloPool[i].get());
+          } else if (engineType == "dino") {
+            processFrameDino(payload.frameBGR, payload.yuvFrame,
+                             dinoPool[i].get(), args.at("--prompt"));
+          }
         }
         inferenceQueue.push(payload);
       }
@@ -364,7 +426,7 @@ bool VideoProcessor::processConfig(const std::string &initSegmentPath,
   while (true) {
     auto payloadOpt = inferenceQueue.pop();
     if (!payloadOpt) {
-      if (activeInferenceThreads == 0 && inferenceQueue.size() == 0) {
+      if (inferenceQueue.is_closed() && inferenceQueue.size() == 0) {
         break;
       }
       continue;
@@ -443,6 +505,31 @@ void VideoProcessor::processFrame(cv::Mat &frame, AVFrame *yuvFrame,
           }
         }
       }
+    }
+  }
+
+  auto t1 = std::chrono::high_resolution_clock::now();
+  double inf_time = std::chrono::duration<double, std::milli>(t1 - t0).count();
+  Metrics::getInstance().addTimeToInference(inf_time);
+  Metrics::getInstance().incrementFramesInferred();
+}
+
+void VideoProcessor::processFrameDino(cv::Mat &frame, AVFrame *yuvFrame,
+                                      GroundingDINO *dino,
+                                      const std::string &prompt) {
+  auto t0 = std::chrono::high_resolution_clock::now();
+
+  std::vector<DINOObject> output = dino->detect(frame, prompt);
+
+  cv::Mat y_plane(yuvFrame->height, yuvFrame->width, CV_8UC1, yuvFrame->data[0],
+                  yuvFrame->linesize[0]);
+
+  for (const auto &det : output) {
+    cv::Rect bbox = det.box & cv::Rect(0, 0, frame.cols, frame.rows);
+    if (bbox.area() > 0) {
+      // Draw a black bounding box around the detected text prompt objects onto
+      // the Y-plane
+      cv::rectangle(y_plane, bbox, cv::Scalar(0), 4);
     }
   }
 
