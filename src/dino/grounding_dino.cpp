@@ -27,7 +27,7 @@ GroundingDINO::GroundingDINO(string modelpath, float box_threshold,
       std::make_unique<Ort::Session>(env, modelpath.c_str(), sessionOptions);
 
   // Dynamically retrieve input tensor dimensions rather than hardcoding.
-  Ort::TypeInfo type_info = ort_session->GetInputTypeInfo(0);
+  TypeInfo type_info = ort_session->GetInputTypeInfo(0);
   auto tensor_info = type_info.GetTensorTypeAndShapeInfo();
   std::vector<int64_t> input_shape = tensor_info.GetShape();
 

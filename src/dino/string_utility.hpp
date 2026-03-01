@@ -15,11 +15,9 @@ std::string do_strip(const std::string &str, int striptype, const std::string&ch
 	std::string::size_type charslen = chars.size();
 	std::string::size_type i, j;
 
-	//默认情况下，去除空白符
 	if (0 == charslen)
 	{
 		i = 0;
-		//去掉左边空白字符
 		if (striptype != RIGHTSTRIP)
 		{
 			while (i < strlen&&::isspace(str[i]))
@@ -28,7 +26,6 @@ std::string do_strip(const std::string &str, int striptype, const std::string&ch
 			}
 		}
 		j = strlen;
-		//去掉右边空白字符
 		if (striptype != LEFTSTRIP)
 		{
 			j--;
@@ -41,12 +38,10 @@ std::string do_strip(const std::string &str, int striptype, const std::string&ch
 	}
 	else
 	{
-		//把删除序列转为c字符串
 		const char*sep = chars.c_str();
 		i = 0;
 		if (striptype != RIGHTSTRIP)
 		{
-			//memchr函数：从sep指向的内存区域的前charslen个字节查找str[i]
 			while (i < strlen&&memchr(sep, str[i], charslen))
 			{
 				i++;
@@ -62,7 +57,6 @@ std::string do_strip(const std::string &str, int striptype, const std::string&ch
 			}
 			j++;
 		}
-		//如果无需要删除的字符
 		if (0 == i && j == strlen)
 		{
 			return str;
